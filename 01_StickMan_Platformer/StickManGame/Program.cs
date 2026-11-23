@@ -18,6 +18,8 @@ Vector2 position = startPosition;
 float velocityY = 0f;
 float walkTime  = 0f;
 int deaths = 0;
+bool hasWon = false;
+Vector2 goalPosition = new Vector2(2850, groundY); 
 
 Camera2D camera = new Camera2D();
 camera.Offset = new Vector2(800 / 2, 600 / 2);
@@ -25,7 +27,14 @@ camera.Target = new Vector2(position.X, position.Y - 50);
 camera.Rotation = 0f;
 camera.Zoom = 1.0f;
 
-// 2. PLATFORMS
+// 2. NEW: ENEMY SETUP
+Vector2 enemyPos = new Vector2(800, groundY - 40); // Start on the ground
+float enemySpeed = 120f;
+float enemyDirection = 1f; // 1 is right, -1 is left
+float enemyPatrolStart = 800f;  // How far left it walks
+float enemyPatrolEnd   = 1100f; // How far right it walks
+
+// 3. PLATFORMS
 Rectangle[] platforms = {
     new(120, 420, 140, 15),
     new(320, 340, 140, 15),
@@ -39,19 +48,19 @@ Rectangle[] platforms = {
     new(2500, 400, 140, 15),  
 };
 
-// 3. NEW: SPIKES! (x, y, width, height)
+// 4. SPIKES
 Rectangle[] spikes = {
-    new(700, groundY - 20, 100, 20),  // On the ground
-    new(1420, 400, 100, 20),          // On a platform
-    new(1950, groundY - 20, 200, 20), // A wider pit on the ground
-    new(2520, 380, 100, 20)           // Near the end
+    new(700, groundY - 20, 100, 20),  
+    new(1420, 400, 100, 20),          
+    new(1950, groundY - 20, 200, 20), 
+    new(2520, 380, 100, 20)           
 };
 
 while (!Raylib.WindowShouldClose())
 {
     float dt = Raylib.GetFrameTime();
 
-    // ----- Horizontal movement -----
+    // ----- Player Movement -----
     float dx = 0f;
     if (Raylib.IsKeyDown(KeyboardKey.A) || Raylib.IsKeyDown(KeyboardKey.Left))  dx -= 1f;
     if (Raylib.IsKeyDown(KeyboardKey.D) || Raylib.IsKeyDown(KeyboardKey.Right)) dx += 1f;
@@ -91,21 +100,37 @@ while (!Raylib.WindowShouldClose())
     }
     if (position.Y > groundY) { position.Y = groundY; velocityY = 0f; }
 
-    // ----- NEW: SPIKE COLLISION -----
-    // Create a rectangle around the stick man for hit detection
-    Rectangle playerRect = new Rectangle(position.X - 15, position.Y - 90, 30, 90);
+    // ----- NEW: ENEMY MOVEMENT -----
+    enemyPos.X += enemySpeed * enemyDirection * dt;
     
+    // If enemy hits the patrol bounds, flip direction
+    if (enemyPos.X > enemyPatrolEnd) { enemyDirection = -1f; }
+    if (enemyPos.X < enemyPatrolStart) { enemyDirection = 1f; }
+
+    // ----- COLLISIONS (Spikes & Enemy) -----
+    Rectangle playerRect = new Rectangle(position.X - 15, position.Y - 90, 30, 90);
+    Rectangle enemyRect  = new Rectangle(enemyPos.X - 20, enemyPos.Y - 40, 40, 40);
+
+    bool hitHazard = false;
+
+    // Check Spikes
     foreach (var spike in spikes)
+        if (Raylib.CheckCollisionRecs(playerRect, spike)) hitHazard = true;
+
+    // Check Enemy
+    if (Raylib.CheckCollisionRecs(playerRect, enemyRect)) hitHazard = true;
+
+    // If hit anything, respawn
+    if (hitHazard && !hasWon)
     {
-        if (Raylib.CheckCollisionRecs(playerRect, spike))
-        {
-            // BAM! Hit a spike.
-            position = startPosition; // Respawn at start
-            velocityY = 0f;           // Stop falling
-            deaths++;                 // Increase death count
-            break;                    // Stop checking other spikes this frame
-        }
+        position = startPosition;
+        velocityY = 0f;
+        deaths++;
     }
+
+    // ----- WIN CONDITION -----
+    if (!hasWon && Vector2.Distance(position, goalPosition) < 50f)
+        hasWon = true;
 
     // ----- Walk animation timer -----
     if (dx != 0f && (position.Y >= groundY || onGround)) walkTime += dt * 12f;
@@ -129,9 +154,20 @@ while (!Raylib.WindowShouldClose())
     foreach (var p in platforms)
         Raylib.DrawRectangleRec(p, new Color(139, 69, 19, 255));
 
-    // Draw Spikes (using a helper function at the bottom)
+    // Draw Spikes
     foreach (var spike in spikes)
         DrawSpikes(spike);
+
+    // Draw Enemy (with little white eyes so it looks like a monster)
+    Raylib.DrawRectangleRec(enemyRect, Color.Maroon);
+    Raylib.DrawCircle((int)enemyPos.X - 8, (int)enemyPos.Y - 25, 4, Color.White);
+    Raylib.DrawCircle((int)enemyPos.X + 8, (int)enemyPos.Y - 25, 4, Color.White);
+    Raylib.DrawCircle((int)enemyPos.X - 8 + (int)(enemyDirection * 2), (int)enemyPos.Y - 25, 2, Color.Black);
+    Raylib.DrawCircle((int)enemyPos.X + 8 + (int)(enemyDirection * 2), (int)enemyPos.Y - 25, 2, Color.Black);
+
+    // Draw Goal Flag
+    Raylib.DrawLineEx(new Vector2(goalPosition.X, goalPosition.Y), new Vector2(goalPosition.X, goalPosition.Y - 120), 4, Color.DarkGray);
+    Raylib.DrawRectangle((int)goalPosition.X, (int)goalPosition.Y - 120, 40, 25, Color.Gold);
 
     DrawStickMan(position, walkTime, inAir);
 
@@ -139,14 +175,28 @@ while (!Raylib.WindowShouldClose())
 
     // Draw UI
     Raylib.DrawText("A/D or arrows = move   Space/W = jump", 10, 10, 20, Color.Black);
-    Raylib.DrawText($"Deaths: {deaths}", 10, 40, 20, Color.Red); // Show deaths!
+    Raylib.DrawText($"Deaths: {deaths}", 10, 40, 20, Color.Red);
+    
+    if (hasWon)
+    {
+        Raylib.DrawRectangle(0, 200, 800, 100, new Color(0, 0, 0, 200));
+        Raylib.DrawText("YOU WIN!", 300, 220, 40, Color.Gold);
+        Raylib.DrawText("Press R to restart", 330, 270, 20, Color.White);
+        
+        if (Raylib.IsKeyPressed(KeyboardKey.R))
+        {
+            hasWon = false;
+            position = startPosition;
+            deaths = 0;
+            enemyPos.X = 800; // Reset enemy position too
+        }
+    }
     
     Raylib.EndDrawing();
 }
 
 Raylib.CloseWindow();
 
-// ----- Helper: Draw Stick Man -----
 void DrawStickMan(Vector2 feet, float walkTime, bool inAir)
 {
     Color c = Color.Black;
@@ -181,10 +231,8 @@ void DrawStickMan(Vector2 feet, float walkTime, bool inAir)
     }
 }
 
-// ----- Helper: Draw Spikes -----
 void DrawSpikes(Rectangle area)
 {
-    // Figure out how many triangles fit in the width
     int numSpikes = (int)(area.Width / 20); 
     float spikeWidth = area.Width / numSpikes;
 
@@ -194,8 +242,7 @@ void DrawSpikes(Rectangle area)
         Vector2 topMiddle  = new(area.X + (i * spikeWidth) + (spikeWidth / 2), area.Y);
         Vector2 bottomRight= new(area.X + ((i + 1) * spikeWidth), area.Y + area.Height);
 
-        // Draw the red triangle
         Raylib.DrawTriangle(bottomLeft, topMiddle, bottomRight, Color.Red);
-        Raylib.DrawTriangle(bottomRight, topMiddle, bottomLeft, Color.Red); // Draw twice to fix Raylib line gaps
+        Raylib.DrawTriangle(bottomRight, topMiddle, bottomLeft, Color.Red); 
     }
 }
