@@ -17,6 +17,7 @@ int deaths = 0;
 int currentLevelIndex = 0;
 bool hasWon = false;
 bool isPaused = false;
+GameState gameState = GameState.Menu;
 
 List<Level> levels = new()
 {
@@ -101,12 +102,98 @@ while (!Raylib.WindowShouldClose())
 {
     float dt = Math.Min(Raylib.GetFrameTime(), 0.033f);
 
-    if (Raylib.IsKeyPressed(KeyboardKey.P) || Raylib.IsKeyPressed(KeyboardKey.Escape))
-        isPaused = !isPaused;
+    // ---------------- MENU NAVIGATION ----------------
+    Vector2 mouse = Raylib.GetMousePosition();
 
-    if (hasWon)
+    if (gameState == GameState.Menu)
     {
-        if (Raylib.IsKeyPressed(KeyboardKey.R))
+        if (Raylib.IsKeyPressed(KeyboardKey.Enter))
+        {
+            currentLevelIndex = 0;
+            currentLevel = levels[currentLevelIndex];
+            position = currentLevel.StartPos;
+            velocityY = 0f;
+            hasWon = false;
+            isPaused = false;
+            foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            gameState = GameState.Playing;
+        }
+
+        if (IsButtonClicked(new Rectangle(390, 260, 220, 58), mouse))
+        {
+            currentLevelIndex = 0;
+            currentLevel = levels[currentLevelIndex];
+            position = currentLevel.StartPos;
+            velocityY = 0f;
+            hasWon = false;
+            isPaused = false;
+            foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            gameState = GameState.Playing;
+        }
+        else if (IsButtonClicked(new Rectangle(390, 375, 220, 58), mouse))
+        {
+            gameState = GameState.LevelSelect;
+        }
+        else if (IsButtonClicked(new Rectangle(390, 450, 220, 58), mouse))
+        {
+            gameState = GameState.HowToPlay;
+        }
+    }
+    else if (gameState == GameState.LevelSelect)
+    {
+        if (Raylib.IsKeyPressed(KeyboardKey.Escape) || IsButtonClicked(new Rectangle(30, 30, 145, 48), mouse))
+            gameState = GameState.Menu;
+
+        if (IsButtonClicked(new Rectangle(300, 285, 180, 100), mouse) || Raylib.IsKeyPressed(KeyboardKey.One))
+        {
+            currentLevelIndex = 0;
+            currentLevel = levels[currentLevelIndex];
+            position = currentLevel.StartPos;
+            velocityY = 0f;
+            hasWon = false;
+            isPaused = false;
+            foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            gameState = GameState.Playing;
+        }
+        else if (IsButtonClicked(new Rectangle(520, 285, 180, 100), mouse) || Raylib.IsKeyPressed(KeyboardKey.Two))
+        {
+            currentLevelIndex = 1;
+            currentLevel = levels[currentLevelIndex];
+            position = currentLevel.StartPos;
+            velocityY = 0f;
+            hasWon = false;
+            isPaused = false;
+            foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            gameState = GameState.Playing;
+        }
+    }
+    else if (gameState == GameState.HowToPlay)
+    {
+        if (Raylib.IsKeyPressed(KeyboardKey.Escape) || Raylib.IsKeyPressed(KeyboardKey.Enter) ||
+            IsButtonClicked(new Rectangle(390, 500, 220, 55), mouse))
+            gameState = GameState.Menu;
+    }
+    else if (gameState == GameState.Playing)
+    {
+        if (Raylib.IsKeyPressed(KeyboardKey.Escape))
+        {
+            gameState = GameState.Menu;
+            isPaused = false;
+        }
+        else if (Raylib.IsKeyPressed(KeyboardKey.P))
+        {
+            isPaused = !isPaused;
+        }
+    }
+
+    if (gameState == GameState.Playing && hasWon)
+    {
+        if (Raylib.IsKeyPressed(KeyboardKey.M))
+        {
+            gameState = GameState.Menu;
+            hasWon = false;
+        }
+        else if (Raylib.IsKeyPressed(KeyboardKey.R))
         {
             currentLevelIndex = (currentLevelIndex + 1) % levels.Count;
             currentLevel = levels[currentLevelIndex];
@@ -116,7 +203,7 @@ while (!Raylib.WindowShouldClose())
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
         }
     }
-    else if (!isPaused)
+    else if (gameState == GameState.Playing && !isPaused && !hasWon)
     {
         // Player movement
         float dx = 0f;
@@ -243,31 +330,43 @@ while (!Raylib.WindowShouldClose())
     camera.Target = Vector2.Lerp(camera.Target, new Vector2(cameraX, position.Y - 100f), 0.10f);
 
     Raylib.BeginDrawing();
-    DrawSkyAndHud(currentLevelIndex + 1, deaths, currentLevel, position.X);
 
-    Raylib.BeginMode2D(camera);
+    if (gameState == GameState.Menu)
+    {
+        DrawMainMenu();
+    }
+    else if (gameState == GameState.LevelSelect)
+    {
+        DrawLevelSelect();
+    }
+    else if (gameState == GameState.HowToPlay)
+    {
+        DrawHowToPlay();
+    }
+    else
+    {
+        DrawSkyAndHud(currentLevelIndex + 1, deaths, currentLevel, position.X);
 
-    DrawCartoonBackground(currentLevel.WorldWidth);
-    DrawWorldGround(currentLevel.WorldWidth);
+        Raylib.BeginMode2D(camera);
+        DrawCartoonBackground(currentLevel.WorldWidth);
+        DrawWorldGround(currentLevel.WorldWidth);
 
-    foreach (Rectangle platform in currentLevel.Platforms)
-        DrawGrassPlatform(platform);
+        foreach (Rectangle platform in currentLevel.Platforms)
+            DrawGrassPlatform(platform);
+        foreach (Rectangle spike in currentLevel.Spikes)
+            DrawCartoonSpikes(spike);
+        foreach (Enemy enemy in currentLevel.Enemies)
+            DrawEnemy(enemy);
 
-    foreach (Rectangle spike in currentLevel.Spikes)
-        DrawCartoonSpikes(spike);
+        DrawGoal(currentLevel.GoalX);
+        DrawStickMan(position, walkTime, velocityY < 0f, isFacingRight, jumpSquash);
+        Raylib.EndMode2D();
 
-    foreach (Enemy enemy in currentLevel.Enemies)
-        DrawEnemy(enemy);
-
-    DrawGoal(currentLevel.GoalX);
-    DrawStickMan(position, walkTime, velocityY < 0f, isFacingRight, jumpSquash);
-
-    Raylib.EndMode2D();
-
-    if (isPaused && !hasWon)
-        DrawOverlay("PAUSED", "Press P or ESC to continue");
-    if (hasWon)
-        DrawOverlay($"LEVEL {currentLevelIndex + 1} COMPLETE!", "Press R for the next adventure");
+        if (isPaused && !hasWon)
+            DrawOverlay("PAUSED", "Press P to resume  |  ESC for menu");
+        if (hasWon)
+            DrawOverlay($"LEVEL {currentLevelIndex + 1} COMPLETE!", "Press R for next level  |  M for menu");
+    }
 
     Raylib.EndDrawing();
 }
@@ -275,6 +374,91 @@ while (!Raylib.WindowShouldClose())
 Raylib.CloseWindow();
 
 // ---------------- DRAWING HELPERS ----------------
+
+bool IsButtonClicked(Rectangle bounds, Vector2 mouse)
+{
+    return Raylib.IsMouseButtonPressed(MouseButton.Left) && Raylib.CheckCollisionPointRec(mouse, bounds);
+}
+
+void DrawMenuButton(string label, Rectangle bounds, Vector2 mouse)
+{
+    bool hovered = Raylib.CheckCollisionPointRec(mouse, bounds);
+    Color fill = hovered ? new Color(255, 196, 75, 255) : new Color(255, 218, 116, 255);
+    Color edge = new(113, 70, 45, 255);
+    Raylib.DrawRectangleRounded(new Rectangle(bounds.X + 3, bounds.Y + 5, bounds.Width, bounds.Height), 0.28f, 8, new Color(35, 55, 70, 90));
+    Raylib.DrawRectangleRounded(bounds, 0.28f, 8, edge);
+    Raylib.DrawRectangleRounded(new Rectangle(bounds.X + 3, bounds.Y + 3, bounds.Width - 6, bounds.Height - 7), 0.25f, 8, fill);
+    int textWidth = Raylib.MeasureText(label, 23);
+    Raylib.DrawText(label, (int)(bounds.X + (bounds.Width - textWidth) / 2), (int)(bounds.Y + 16), 23, new Color(64, 54, 50, 255));
+}
+
+void DrawMenuScenery()
+{
+    Raylib.ClearBackground(new Color(116, 205, 255, 255));
+    Raylib.DrawCircle(850, 105, 52, new Color(255, 226, 112, 255));
+    DrawCloud(135, 120, 1.15f);
+    DrawCloud(760, 215, 0.85f);
+    DrawCloud(420, 95, 0.7f);
+    Raylib.DrawCircle(120, 610, 230, new Color(111, 190, 116, 255));
+    Raylib.DrawCircle(430, 650, 260, new Color(92, 174, 105, 255));
+    Raylib.DrawCircle(900, 620, 250, new Color(111, 190, 116, 255));
+    Raylib.DrawRectangle(0, 570, screenWidth, 80, new Color(65, 177, 75, 255));
+    Raylib.DrawRectangle(0, 585, screenWidth, 65, new Color(133, 83, 48, 255));
+}
+
+void DrawMainMenu()
+{
+    Vector2 mouse = Raylib.GetMousePosition();
+    DrawMenuScenery();
+
+    string title = "STICK MAN ADVENTURE";
+    int titleWidth = Raylib.MeasureText(title, 48);
+    Raylib.DrawText(title, screenWidth / 2 - titleWidth / 2 + 4, 115, 48, new Color(30, 66, 84, 100));
+    Raylib.DrawText(title, screenWidth / 2 - titleWidth / 2, 110, 48, Color.White);
+    string tagline = "JUMP • DODGE • EXPLORE!";
+    int taglineWidth = Raylib.MeasureText(tagline, 20);
+    Raylib.DrawText(tagline, screenWidth / 2 - taglineWidth / 2, 170, 20, new Color(45, 83, 91, 255));
+
+    DrawMenuButton("PLAY", new Rectangle(390, 260, 220, 58), mouse);
+    DrawMenuButton("LEVEL SELECT", new Rectangle(390, 335, 220, 58), mouse);
+    DrawMenuButton("HOW TO PLAY", new Rectangle(390, 410, 220, 58), mouse);
+
+    DrawStickMan(new Vector2(255, 570), 2.4f, false, true, 0f);
+    Raylib.DrawText("v1.0  •  MADE WITH RAYLIB", 18, 620, 14, Color.White);
+    Raylib.DrawText("PRESS ENTER TO PLAY", 755, 620, 14, Color.White);
+}
+
+void DrawLevelSelect()
+{
+    Vector2 mouse = Raylib.GetMousePosition();
+    DrawMenuScenery();
+    Raylib.DrawText("CHOOSE YOUR LEVEL", 300, 145, 38, Color.White);
+    DrawMenuButton("< BACK", new Rectangle(30, 30, 145, 48), mouse);
+
+    Rectangle first = new(300, 285, 180, 100);
+    Rectangle second = new(520, 285, 180, 100);
+    bool hoverFirst = Raylib.CheckCollisionPointRec(mouse, first);
+    bool hoverSecond = Raylib.CheckCollisionPointRec(mouse, second);
+    Raylib.DrawRectangleRounded(first, 0.18f, 8, hoverFirst ? new Color(255, 196, 75, 255) : new Color(255, 218, 116, 255));
+    Raylib.DrawRectangleRounded(second, 0.18f, 8, hoverSecond ? new Color(255, 196, 75, 255) : new Color(255, 218, 116, 255));
+    Raylib.DrawText("LEVEL 1", 338, 310, 25, new Color(64, 54, 50, 255));
+    Raylib.DrawText("BEGINNER", 340, 345, 17, new Color(95, 75, 60, 255));
+    Raylib.DrawText("LEVEL 2", 558, 310, 25, new Color(64, 54, 50, 255));
+    Raylib.DrawText("CHALLENGE", 555, 345, 17, new Color(95, 75, 60, 255));
+    Raylib.DrawText("Click a level or press 1 / 2", 365, 435, 20, Color.White);
+}
+
+void DrawHowToPlay()
+{
+    DrawMenuScenery();
+    Raylib.DrawText("HOW TO PLAY", 365, 120, 40, Color.White);
+    Raylib.DrawRectangleRounded(new Rectangle(250, 205, 500, 245), 0.08f, 10, new Color(25, 55, 82, 220));
+    Raylib.DrawText("MOVE       A / D  or  LEFT / RIGHT", 295, 245, 21, Color.White);
+    Raylib.DrawText("JUMP       SPACE / W / UP", 295, 295, 21, Color.White);
+    Raylib.DrawText("PAUSE      P", 295, 345, 21, Color.White);
+    Raylib.DrawText("STOMP ENEMIES FROM ABOVE!", 295, 395, 19, new Color(255, 218, 100, 255));
+    DrawMenuButton("BACK", new Rectangle(390, 500, 220, 55), Raylib.GetMousePosition());
+}
 
 void DrawSkyAndHud(int levelNumber, int deathCount, Level level, float playerX)
 {
@@ -476,6 +660,14 @@ void DrawOverlay(string title, string subtitle)
     int subtitleWidth = Raylib.MeasureText(subtitle, 21);
     Raylib.DrawText(title, screenWidth / 2 - titleWidth / 2, 250, 42, new Color(255, 218, 100, 255));
     Raylib.DrawText(subtitle, screenWidth / 2 - subtitleWidth / 2, 315, 21, Color.White);
+}
+
+enum GameState
+{
+    Menu,
+    LevelSelect,
+    HowToPlay,
+    Playing
 }
 
 class Enemy
