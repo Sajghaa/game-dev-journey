@@ -1,248 +1,537 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Raylib_cs;
 
-Raylib.InitWindow(800, 600, "Stick Man Game");
+const int screenWidth = 1000;
+const int screenHeight = 650;
+const float groundY = 540f;
+const float gravity = 1500f;
+const float jumpForce = -650f;
+const float moveSpeed = 280f;
+
+Raylib.InitWindow(screenWidth, screenHeight, "Stick Man Adventure");
 Raylib.SetTargetFPS(60);
 
-// 1. WORLD SETTINGS
-float worldWidth = 3000f;
-const float groundY    = 520f;
-const float gravity    = 1500f;
-const float jumpForce  = -650f;
-const float moveSpeed  = 250f;
-
-// Start position (for respawning)
-Vector2 startPosition = new(100, groundY);
-Vector2 position = startPosition;
-float velocityY = 0f;
-float walkTime  = 0f;
 int deaths = 0;
+int currentLevelIndex = 0;
 bool hasWon = false;
-Vector2 goalPosition = new Vector2(2850, groundY); 
+bool isPaused = false;
 
-Camera2D camera = new Camera2D();
-camera.Offset = new Vector2(800 / 2, 600 / 2);
-camera.Target = new Vector2(position.X, position.Y - 50);
-camera.Rotation = 0f;
-camera.Zoom = 1.0f;
-
-// 2. NEW: ENEMY SETUP
-Vector2 enemyPos = new Vector2(800, groundY - 40); // Start on the ground
-float enemySpeed = 120f;
-float enemyDirection = 1f; // 1 is right, -1 is left
-float enemyPatrolStart = 800f;  // How far left it walks
-float enemyPatrolEnd   = 1100f; // How far right it walks
-
-// 3. PLATFORMS
-Rectangle[] platforms = {
-    new(120, 420, 140, 15),
-    new(320, 340, 140, 15),
-    new(540, 420, 140, 15),
-    new(900, 380, 140, 15),   
-    new(1150, 300, 140, 15),  
-    new(1400, 420, 140, 15),  
-    new(1650, 340, 140, 15),  
-    new(1900, 420, 140, 15),  
-    new(2200, 300, 140, 15),  
-    new(2500, 400, 140, 15),  
+List<Level> levels = new()
+{
+    new Level
+    {
+        WorldWidth = 3200f,
+        GoalX = 3000f,
+        StartPos = new Vector2(100, groundY),
+        Platforms = new Rectangle[]
+        {
+            new(300, 440, 150, 22),
+            new(560, 350, 150, 22),
+            new(850, 440, 150, 22),
+            new(1350, 420, 170, 22),
+            new(1640, 330, 170, 22),
+            new(1950, 420, 170, 22),
+            new(2350, 360, 180, 22)
+        },
+        Spikes = new Rectangle[]
+        {
+            new(1050, groundY - 28, 130, 28),
+            new(1780, groundY - 28, 120, 28),
+            new(2150, groundY - 28, 140, 28)
+        },
+        Enemies = new List<Enemy>
+        {
+            new(650, 950, groundY - 22),
+            new(1450, 1700, groundY - 22),
+            new(2450, 2750, groundY - 22)
+        }
+    },
+    new Level
+    {
+        WorldWidth = 3500f,
+        GoalX = 3300f,
+        StartPos = new Vector2(100, groundY),
+        Platforms = new Rectangle[]
+        {
+            new(250, 450, 130, 22),
+            new(470, 360, 130, 22),
+            new(700, 270, 130, 22),
+            new(1100, 430, 180, 22),
+            new(1430, 340, 150, 22),
+            new(1700, 250, 150, 22),
+            new(2150, 420, 180, 22),
+            new(2500, 330, 160, 22),
+            new(2800, 420, 160, 22)
+        },
+        Spikes = new Rectangle[]
+        {
+            new(870, groundY - 28, 180, 28),
+            new(1870, groundY - 28, 180, 28),
+            new(2350, groundY - 28, 130, 28),
+            new(3000, groundY - 28, 100, 28)
+        },
+        Enemies = new List<Enemy>
+        {
+            new(1150, 1350, groundY - 22),
+            new(2200, 2450, groundY - 22),
+            new(2850, 3100, groundY - 22)
+        }
+    }
 };
 
-// 4. SPIKES
-Rectangle[] spikes = {
-    new(700, groundY - 20, 100, 20),  
-    new(1420, 400, 100, 20),          
-    new(1950, groundY - 20, 200, 20), 
-    new(2520, 380, 100, 20)           
+Level currentLevel = levels[currentLevelIndex];
+Vector2 position = currentLevel.StartPos; // Player position is the centre of the feet.
+float velocityY = 0f;
+float walkTime = 0f;
+float jumpSquash = 0f;
+bool isFacingRight = true;
+bool wasOnGround = true;
+
+Camera2D camera = new()
+{
+    Offset = new Vector2(screenWidth / 2f, screenHeight / 2f),
+    Target = new Vector2(screenWidth / 2f, screenHeight / 2f),
+    Rotation = 0f,
+    Zoom = 1f
 };
 
 while (!Raylib.WindowShouldClose())
 {
-    float dt = Raylib.GetFrameTime();
+    float dt = Math.Min(Raylib.GetFrameTime(), 0.033f);
 
-    // ----- Player Movement -----
-    float dx = 0f;
-    if (Raylib.IsKeyDown(KeyboardKey.A) || Raylib.IsKeyDown(KeyboardKey.Left))  dx -= 1f;
-    if (Raylib.IsKeyDown(KeyboardKey.D) || Raylib.IsKeyDown(KeyboardKey.Right)) dx += 1f;
-    position.X += dx * moveSpeed * dt;
-    position.X = Math.Clamp(position.X, 20f, worldWidth - 20f);
+    if (Raylib.IsKeyPressed(KeyboardKey.P) || Raylib.IsKeyPressed(KeyboardKey.Escape))
+        isPaused = !isPaused;
 
-    // ----- Check if on ground or a platform -----
-    bool onGround = position.Y >= groundY - 1f;
-    foreach (var p in platforms)
-        if (Math.Abs(position.Y - p.Y) < 2f
-            && position.X >= p.X - 15 && position.X <= p.X + p.Width + 15)
-            onGround = true;
-
-    // ----- Jump -----
-    if (onGround && (Raylib.IsKeyPressed(KeyboardKey.Space)
-                  || Raylib.IsKeyPressed(KeyboardKey.W)
-                  || Raylib.IsKeyPressed(KeyboardKey.Up)))
+    if (hasWon)
     {
-        velocityY = jumpForce;
-        onGround = false;
+        if (Raylib.IsKeyPressed(KeyboardKey.R))
+        {
+            currentLevelIndex = (currentLevelIndex + 1) % levels.Count;
+            currentLevel = levels[currentLevelIndex];
+            position = currentLevel.StartPos;
+            velocityY = 0f;
+            hasWon = false;
+            foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+        }
     }
-
-    // ----- Gravity + landing -----
-    float prevY = position.Y;
-    velocityY += gravity * dt;
-    position.Y += velocityY * dt;
-
-    if (velocityY >= 0f)
+    else if (!isPaused)
     {
-        foreach (var p in platforms)
-            if (position.X >= p.X - 15 && position.X <= p.X + p.Width + 15
-                && prevY <= p.Y && position.Y >= p.Y)
+        // Player movement
+        float dx = 0f;
+        if (Raylib.IsKeyDown(KeyboardKey.A) || Raylib.IsKeyDown(KeyboardKey.Left))
+        {
+            dx -= 1f;
+            isFacingRight = false;
+        }
+        if (Raylib.IsKeyDown(KeyboardKey.D) || Raylib.IsKeyDown(KeyboardKey.Right))
+        {
+            dx += 1f;
+            isFacingRight = true;
+        }
+
+        position.X += dx * moveSpeed * dt;
+        position.X = Math.Clamp(position.X, 20f, currentLevel.WorldWidth - 20f);
+
+        // Work out whether the player is standing on the ground or a platform.
+        bool onGround = position.Y >= groundY - 1f;
+        if (onGround)
+        {
+            position.Y = groundY;
+            velocityY = Math.Max(0f, velocityY);
+        }
+
+        Rectangle playerFeet = new(position.X - 13f, position.Y - 7f, 26f, 14f);
+        foreach (Rectangle platform in currentLevel.Platforms)
+        {
+            Rectangle platformTop = new(platform.X, platform.Y - 4f, platform.Width, 8f);
+            if (Raylib.CheckCollisionRecs(playerFeet, platformTop))
+                onGround = true;
+        }
+
+        if (onGround && (Raylib.IsKeyPressed(KeyboardKey.Space) ||
+                         Raylib.IsKeyPressed(KeyboardKey.W) ||
+                         Raylib.IsKeyPressed(KeyboardKey.Up)))
+        {
+            velocityY = jumpForce;
+            onGround = false;
+        }
+
+        float previousY = position.Y;
+        velocityY += gravity * dt;
+        position.Y += velocityY * dt;
+
+        // Land on platforms only while falling.
+        if (velocityY >= 0f)
+        {
+            foreach (Rectangle platform in currentLevel.Platforms)
             {
-                position.Y = p.Y;
-                velocityY = 0f;
+                bool overlapsX = position.X + 13f > platform.X &&
+                                 position.X - 13f < platform.X + platform.Width;
+                bool crossedTop = previousY <= platform.Y && position.Y >= platform.Y;
+                if (overlapsX && crossedTop)
+                {
+                    position.Y = platform.Y;
+                    velocityY = 0f;
+                    onGround = true;
+                }
             }
+        }
+
+        if (position.Y >= groundY)
+        {
+            position.Y = groundY;
+            velocityY = 0f;
+            onGround = true;
+        }
+
+        bool inAir = !onGround;
+        if (dx != 0f && !inAir) walkTime += dt * 11f;
+        jumpSquash += ((inAir ? 0.12f : 0f) - jumpSquash) * Math.Min(1f, dt * 8f);
+
+        // Collision body.
+        Rectangle playerRect = new(position.X - 14f, position.Y - 72f, 28f, 68f);
+        bool hitHazard = false;
+
+        foreach (Rectangle spike in currentLevel.Spikes)
+        {
+            Rectangle spikeHitbox = new(spike.X + 5f, spike.Y + 8f, spike.Width - 10f, spike.Height - 8f);
+            if (Raylib.CheckCollisionRecs(playerRect, spikeHitbox))
+                hitHazard = true;
+        }
+
+        foreach (Enemy enemy in currentLevel.Enemies)
+        {
+            if (enemy.IsSquashed) continue;
+
+            Rectangle enemyRect = new(enemy.Position.X - 19f, enemy.Position.Y - 34f, 38f, 34f);
+            if (Raylib.CheckCollisionRecs(playerRect, enemyRect))
+            {
+                bool stomping = velocityY > 0f && previousY - 72f <= enemyRect.Y + 12f;
+                if (stomping)
+                {
+                    enemy.IsSquashed = true;
+                    velocityY = -440f;
+                }
+                else
+                {
+                    hitHazard = true;
+                }
+            }
+        }
+
+        if (hitHazard)
+        {
+            position = currentLevel.StartPos;
+            velocityY = 0f;
+            deaths++;
+            foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+        }
+
+        foreach (Enemy enemy in currentLevel.Enemies)
+            enemy.Update(dt);
+
+        if (position.X >= currentLevel.GoalX - 28f && position.Y >= groundY - 2f)
+            hasWon = true;
+
+        wasOnGround = onGround;
     }
-    if (position.Y > groundY) { position.Y = groundY; velocityY = 0f; }
 
-    // ----- NEW: ENEMY MOVEMENT -----
-    enemyPos.X += enemySpeed * enemyDirection * dt;
-    
-    // If enemy hits the patrol bounds, flip direction
-    if (enemyPos.X > enemyPatrolEnd) { enemyDirection = -1f; }
-    if (enemyPos.X < enemyPatrolStart) { enemyDirection = 1f; }
+    // Smooth camera follow.
+    float cameraX = Math.Clamp(position.X, screenWidth / 2f, currentLevel.WorldWidth - screenWidth / 2f);
+    camera.Target = Vector2.Lerp(camera.Target, new Vector2(cameraX, position.Y - 100f), 0.10f);
 
-    // ----- COLLISIONS (Spikes & Enemy) -----
-    Rectangle playerRect = new Rectangle(position.X - 15, position.Y - 90, 30, 90);
-    Rectangle enemyRect  = new Rectangle(enemyPos.X - 20, enemyPos.Y - 40, 40, 40);
-
-    bool hitHazard = false;
-
-    // Check Spikes
-    foreach (var spike in spikes)
-        if (Raylib.CheckCollisionRecs(playerRect, spike)) hitHazard = true;
-
-    // Check Enemy
-    if (Raylib.CheckCollisionRecs(playerRect, enemyRect)) hitHazard = true;
-
-    // If hit anything, respawn
-    if (hitHazard && !hasWon)
-    {
-        position = startPosition;
-        velocityY = 0f;
-        deaths++;
-    }
-
-    // ----- WIN CONDITION -----
-    if (!hasWon && Vector2.Distance(position, goalPosition) < 50f)
-        hasWon = true;
-
-    // ----- Walk animation timer -----
-    if (dx != 0f && (position.Y >= groundY || onGround)) walkTime += dt * 12f;
-    else if (dx == 0f) walkTime = 0f;
-    bool inAir = position.Y < groundY - 2f && !onGround;
-
-    // ----- CAMERA UPDATE -----
-    float camX = Math.Clamp(position.X, 400f, worldWidth - 400f);
-    camera.Target = new Vector2(camX, position.Y - 100);
-
-    // ----- Draw -----
     Raylib.BeginDrawing();
-    Raylib.ClearBackground(new Color(135, 206, 235, 255));
+    DrawSkyAndHud(currentLevelIndex + 1, deaths, currentLevel, position.X);
 
     Raylib.BeginMode2D(camera);
 
-    // Draw Ground
-    Raylib.DrawRectangle(0, (int)groundY, (int)worldWidth, 80, new Color(34, 139, 34, 255));
+    DrawCartoonBackground(currentLevel.WorldWidth);
+    DrawWorldGround(currentLevel.WorldWidth);
 
-    // Draw Platforms
-    foreach (var p in platforms)
-        Raylib.DrawRectangleRec(p, new Color(139, 69, 19, 255));
+    foreach (Rectangle platform in currentLevel.Platforms)
+        DrawGrassPlatform(platform);
 
-    // Draw Spikes
-    foreach (var spike in spikes)
-        DrawSpikes(spike);
+    foreach (Rectangle spike in currentLevel.Spikes)
+        DrawCartoonSpikes(spike);
 
-    // Draw Enemy (with little white eyes so it looks like a monster)
-    Raylib.DrawRectangleRec(enemyRect, Color.Maroon);
-    Raylib.DrawCircle((int)enemyPos.X - 8, (int)enemyPos.Y - 25, 4, Color.White);
-    Raylib.DrawCircle((int)enemyPos.X + 8, (int)enemyPos.Y - 25, 4, Color.White);
-    Raylib.DrawCircle((int)enemyPos.X - 8 + (int)(enemyDirection * 2), (int)enemyPos.Y - 25, 2, Color.Black);
-    Raylib.DrawCircle((int)enemyPos.X + 8 + (int)(enemyDirection * 2), (int)enemyPos.Y - 25, 2, Color.Black);
+    foreach (Enemy enemy in currentLevel.Enemies)
+        DrawEnemy(enemy);
 
-    // Draw Goal Flag
-    Raylib.DrawLineEx(new Vector2(goalPosition.X, goalPosition.Y), new Vector2(goalPosition.X, goalPosition.Y - 120), 4, Color.DarkGray);
-    Raylib.DrawRectangle((int)goalPosition.X, (int)goalPosition.Y - 120, 40, 25, Color.Gold);
-
-    DrawStickMan(position, walkTime, inAir);
+    DrawGoal(currentLevel.GoalX);
+    DrawStickMan(position, walkTime, velocityY < 0f, isFacingRight, jumpSquash);
 
     Raylib.EndMode2D();
 
-    // Draw UI
-    Raylib.DrawText("A/D or arrows = move   Space/W = jump", 10, 10, 20, Color.Black);
-    Raylib.DrawText($"Deaths: {deaths}", 10, 40, 20, Color.Red);
-    
+    if (isPaused && !hasWon)
+        DrawOverlay("PAUSED", "Press P or ESC to continue");
     if (hasWon)
-    {
-        Raylib.DrawRectangle(0, 200, 800, 100, new Color(0, 0, 0, 200));
-        Raylib.DrawText("YOU WIN!", 300, 220, 40, Color.Gold);
-        Raylib.DrawText("Press R to restart", 330, 270, 20, Color.White);
-        
-        if (Raylib.IsKeyPressed(KeyboardKey.R))
-        {
-            hasWon = false;
-            position = startPosition;
-            deaths = 0;
-            enemyPos.X = 800; // Reset enemy position too
-        }
-    }
-    
+        DrawOverlay($"LEVEL {currentLevelIndex + 1} COMPLETE!", "Press R for the next adventure");
+
     Raylib.EndDrawing();
 }
 
 Raylib.CloseWindow();
 
-void DrawStickMan(Vector2 feet, float walkTime, bool inAir)
+// ---------------- DRAWING HELPERS ----------------
+
+void DrawSkyAndHud(int levelNumber, int deathCount, Level level, float playerX)
 {
-    Color c = Color.Black;
-    Vector2 head = new(feet.X, feet.Y - 90);
-    Vector2 neck = new(feet.X, feet.Y - 70);
-    Vector2 hip  = new(feet.X, feet.Y - 35);
+    Raylib.ClearBackground(new Color(116, 205, 255, 255));
 
-    Raylib.DrawCircleV(head, 12, c);
-    Raylib.DrawLineV(head, hip, c);
+    // Soft sun and clouds are drawn in screen space.
+    Raylib.DrawCircle(870, 95, 42, new Color(255, 226, 112, 255));
+    DrawCloud(140, 105, 1f);
+    DrawCloud(440, 75, 0.75f);
+    DrawCloud(700, 165, 0.9f);
 
-    if (inAir)
+    Raylib.DrawRectangle(0, 0, screenWidth, 12, new Color(255, 255, 255, 70));
+
+    // HUD panel
+    Raylib.DrawRectangle(18, 18, 245, 82, new Color(25, 55, 82, 220));
+    Raylib.DrawRectangle(18, 18, 245, 7, new Color(255, 210, 75, 255));
+    Raylib.DrawText($"LEVEL {levelNumber}", 34, 34, 23, Color.White);
+    Raylib.DrawText($"FALLS: {deathCount}", 35, 66, 18, new Color(255, 180, 180, 255));
+
+    // Progress bar
+    float progress = Math.Clamp(playerX / level.GoalX, 0f, 1f);
+    Raylib.DrawRectangle(700, 32, 260, 18, new Color(25, 55, 82, 210));
+    Raylib.DrawRectangle(704, 36, (int)(252 * progress), 10, new Color(255, 210, 75, 255));
+    Raylib.DrawText("ADVENTURE PROGRESS", 700, 12, 15, Color.White);
+    Raylib.DrawText("A/D or arrows: move     SPACE: jump     P: pause", 310, 615, 17, Color.White);
+}
+
+void DrawCloud(float x, float y, float scale)
+{
+    Color cloud = new(255, 255, 255, 235);
+    Raylib.DrawCircleV(new Vector2(x, y), 23 * scale, cloud);
+    Raylib.DrawCircleV(new Vector2(x + 25 * scale, y - 12 * scale), 30 * scale, cloud);
+    Raylib.DrawCircleV(new Vector2(x + 55 * scale, y), 23 * scale, cloud);
+    Raylib.DrawRectangle((int)(x - 2 * scale), (int)y, (int)(60 * scale), (int)(19 * scale), cloud);
+}
+
+void DrawCartoonBackground(float worldWidth)
+{
+    // Distant rolling hills.
+    for (int i = 0; i < (int)(worldWidth / 420f) + 2; i++)
     {
-        Raylib.DrawLineV(neck, new Vector2(neck.X - 25, neck.Y - 20), c);
-        Raylib.DrawLineV(neck, new Vector2(neck.X + 25, neck.Y - 20), c);
-        Raylib.DrawLineV(hip,  new Vector2(hip.X  - 18, feet.Y),     c);
-        Raylib.DrawLineV(hip,  new Vector2(hip.X  + 18, feet.Y),     c);
+        float x = i * 420f;
+        Raylib.DrawCircleV(new Vector2(x + 120, groundY - 55), 145, new Color(111, 190, 116, 255));
+        Raylib.DrawCircleV(new Vector2(x + 310, groundY - 45), 125, new Color(92, 174, 105, 255));
     }
-    else if (walkTime > 0f)
+
+    // Little decorative flowers along the ground.
+    for (int i = 0; i < (int)(worldWidth / 170f); i++)
     {
-        float s = (float)Math.Sin(walkTime) * 20f;
-        Raylib.DrawLineV(neck, new Vector2(neck.X + s, neck.Y + 30), c);
-        Raylib.DrawLineV(neck, new Vector2(neck.X - s, neck.Y + 30), c);
-        Raylib.DrawLineV(hip,  new Vector2(hip.X  + s, feet.Y),      c);
-        Raylib.DrawLineV(hip,  new Vector2(hip.X  - s, feet.Y),      c);
-    }
-    else
-    {
-        Raylib.DrawLineV(neck, new Vector2(neck.X - 15, neck.Y + 30), c);
-        Raylib.DrawLineV(neck, new Vector2(neck.X + 15, neck.Y + 30), c);
-        Raylib.DrawLineV(hip,  new Vector2(hip.X  - 10, feet.Y),      c);
-        Raylib.DrawLineV(hip,  new Vector2(hip.X  + 10, feet.Y),      c);
+        float x = i * 170f + 55f;
+        Raylib.DrawLineEx(new Vector2(x, groundY - 5), new Vector2(x, groundY - 23), 3, new Color(38, 130, 65, 255));
+        Raylib.DrawCircle((int)x, (int)(groundY - 25), 5, new Color(255, 220, 80, 255));
+        Raylib.DrawCircle((int)(x - 5), (int)(groundY - 28), 3, Color.White);
+        Raylib.DrawCircle((int)(x + 5), (int)(groundY - 28), 3, Color.White);
     }
 }
 
-void DrawSpikes(Rectangle area)
+void DrawWorldGround(float worldWidth)
 {
-    int numSpikes = (int)(area.Width / 20); 
-    float spikeWidth = area.Width / numSpikes;
+    Raylib.DrawRectangle(0, (int)groundY, (int)worldWidth, 120, new Color(133, 83, 48, 255));
+    Raylib.DrawRectangle(0, (int)groundY, (int)worldWidth, 15, new Color(65, 177, 75, 255));
+    Raylib.DrawRectangle(0, (int)groundY + 15, (int)worldWidth, 5, new Color(45, 143, 61, 255));
 
-    for (int i = 0; i < numSpikes; i++)
+    for (int i = 0; i < (int)(worldWidth / 65f); i++)
     {
-        Vector2 bottomLeft = new(area.X + (i * spikeWidth), area.Y + area.Height);
-        Vector2 topMiddle  = new(area.X + (i * spikeWidth) + (spikeWidth / 2), area.Y);
-        Vector2 bottomRight= new(area.X + ((i + 1) * spikeWidth), area.Y + area.Height);
-
-        Raylib.DrawTriangle(bottomLeft, topMiddle, bottomRight, Color.Red);
-        Raylib.DrawTriangle(bottomRight, topMiddle, bottomLeft, Color.Red); 
+        float x = i * 65f + 18f;
+        Raylib.DrawCircle((int)x, (int)(groundY + 43 + (i % 3) * 13), 3, new Color(101, 61, 39, 255));
     }
+}
+
+void DrawGrassPlatform(Rectangle platform)
+{
+    Raylib.DrawRectangleRec(platform, new Color(151, 91, 51, 255));
+    Raylib.DrawRectangle((int)platform.X, (int)platform.Y, (int)platform.Width, 9, new Color(66, 181, 76, 255));
+    Raylib.DrawRectangle((int)platform.X, (int)platform.Y + 9, (int)platform.Width, 4, new Color(45, 145, 59, 255));
+
+    for (int i = 0; i < (int)(platform.Width / 24f); i++)
+    {
+        float x = platform.X + 12 + i * 24;
+        Raylib.DrawLineEx(new Vector2(x, platform.Y + 2), new Vector2(x - 3, platform.Y - 5), 2, new Color(39, 145, 59, 255));
+    }
+
+    for (int i = 0; i < (int)(platform.Width / 42f); i++)
+        Raylib.DrawCircle((int)(platform.X + 18 + i * 42), (int)(platform.Y + 17), 2, new Color(105, 62, 38, 255));
+}
+
+void DrawCartoonSpikes(Rectangle area)
+{
+    int count = Math.Max(1, (int)(area.Width / 24f));
+    float width = area.Width / count;
+
+    for (int i = 0; i < count; i++)
+    {
+        Vector2 left = new(area.X + i * width, area.Y + area.Height);
+        Vector2 top = new(area.X + i * width + width / 2f, area.Y + 2);
+        Vector2 right = new(area.X + (i + 1) * width, area.Y + area.Height);
+        Raylib.DrawTriangle(left, top, right, new Color(239, 76, 75, 255));
+        Raylib.DrawLineEx(left, top, 2, new Color(255, 160, 145, 255));
+        Raylib.DrawLineEx(top, right, 2, new Color(166, 43, 48, 255));
+    }
+    Raylib.DrawRectangle((int)area.X, (int)(area.Y + area.Height - 4), (int)area.Width, 4, new Color(125, 54, 52, 255));
+}
+
+void DrawEnemy(Enemy enemy)
+{
+    float x = enemy.Position.X;
+    float y = enemy.Position.Y;
+
+    if (enemy.IsSquashed)
+    {
+        Raylib.DrawEllipse((int)x, (int)(y - 4), 22, 7, new Color(151, 55, 68, 255));
+        return;
+    }
+
+    float bob = (float)Math.Sin(enemy.BobTime * 8f) * 2f;
+    Raylib.DrawEllipse((int)x, (int)(y - 2), 23, 6, new Color(42, 75, 54, 90));
+    Raylib.DrawCircleV(new Vector2(x, y - 19 + bob), 19, new Color(218, 75, 91, 255));
+    Raylib.DrawCircleV(new Vector2(x - 6, y - 23 + bob), 5, Color.White);
+    Raylib.DrawCircleV(new Vector2(x + 6, y - 23 + bob), 5, Color.White);
+
+    float eyeDirection = enemy.Direction >= 0 ? 1f : -1f;
+    Raylib.DrawCircleV(new Vector2(x - 6 + eyeDirection * 2, y - 23 + bob), 2.4f, Color.Black);
+    Raylib.DrawCircleV(new Vector2(x + 6 + eyeDirection * 2, y - 23 + bob), 2.4f, Color.Black);
+    Raylib.DrawLineEx(new Vector2(x - 6, y - 10 + bob), new Vector2(x + 6, y - 10 + bob), 2, new Color(100, 35, 48, 255));
+    Raylib.DrawCircleV(new Vector2(x - 13, y - 13 + bob), 3, new Color(255, 145, 145, 255));
+    Raylib.DrawCircleV(new Vector2(x + 13, y - 13 + bob), 3, new Color(255, 145, 145, 255));
+}
+
+void DrawGoal(float goalX)
+{
+    Raylib.DrawLineEx(new Vector2(goalX, groundY), new Vector2(goalX, groundY - 145), 7, new Color(92, 75, 59, 255));
+    Raylib.DrawCircle((int)goalX, (int)(groundY - 148), 7, new Color(255, 214, 79, 255));
+    Raylib.DrawTriangle(
+        new Vector2(goalX + 4, groundY - 140),
+        new Vector2(goalX + 78, groundY - 119),
+        new Vector2(goalX + 4, groundY - 96),
+        new Color(255, 190, 55, 255));
+    Raylib.DrawText("GO!", (int)goalX + 12, (int)groundY - 130, 18, new Color(105, 67, 25, 255));
+}
+
+void DrawStickMan(Vector2 feet, float walkTime, bool jumping, bool facingRight, float squash)
+{
+    Color outline = new(24, 34, 48, 255);
+    Color body = new(36, 48, 68, 255);
+    float direction = facingRight ? 1f : -1f;
+    float bob = jumping ? -2f : (float)Math.Sin(walkTime * 2f) * 2f;
+    float headY = feet.Y - 61f + bob;
+    float shoulderY = feet.Y - 43f + bob;
+    float hipY = feet.Y - 22f + bob;
+
+    Raylib.DrawEllipse((int)feet.X, (int)(feet.Y + 2), 17, 5, new Color(35, 67, 55, 75));
+
+    // Legs animate in opposite directions.
+    float legSwing = jumping ? 9f : (float)Math.Sin(walkTime) * 11f;
+    Vector2 leftHip = new(feet.X - 4, hipY);
+    Vector2 rightHip = new(feet.X + 4, hipY);
+    Vector2 leftFoot = jumping
+        ? new Vector2(feet.X - 13, feet.Y - 5)
+        : new Vector2(feet.X - 7 + legSwing, feet.Y);
+    Vector2 rightFoot = jumping
+        ? new Vector2(feet.X + 14, feet.Y - 12)
+        : new Vector2(feet.X + 7 - legSwing, feet.Y);
+
+    Raylib.DrawLineEx(leftHip, leftFoot, 7, outline);
+    Raylib.DrawLineEx(rightHip, rightFoot, 7, outline);
+    Raylib.DrawLineEx(leftHip, leftFoot, 3, body);
+    Raylib.DrawLineEx(rightHip, rightFoot, 3, body);
+
+    // Torso and arms.
+    Raylib.DrawLineEx(new Vector2(feet.X, shoulderY), new Vector2(feet.X, hipY), 9, outline);
+    Raylib.DrawLineEx(new Vector2(feet.X, shoulderY), new Vector2(feet.X, hipY), 5, body);
+
+    float armSwing = jumping ? -10f : (float)Math.Sin(walkTime + Math.PI) * 12f;
+    Vector2 leftHand = new(feet.X - 15 + armSwing, shoulderY + 19);
+    Vector2 rightHand = new(feet.X + 15 - armSwing, shoulderY + 19);
+    if (jumping)
+    {
+        leftHand = new Vector2(feet.X - 19, shoulderY - 15);
+        rightHand = new Vector2(feet.X + 19, shoulderY - 15);
+    }
+
+    Raylib.DrawLineEx(new Vector2(feet.X - 2, shoulderY + 2), leftHand, 6, outline);
+    Raylib.DrawLineEx(new Vector2(feet.X + 2, shoulderY + 2), rightHand, 6, outline);
+    Raylib.DrawLineEx(new Vector2(feet.X - 2, shoulderY + 2), leftHand, 3, body);
+    Raylib.DrawLineEx(new Vector2(feet.X + 2, shoulderY + 2), rightHand, 3, body);
+
+    // Head, face and hair tuft.
+    Raylib.DrawCircleV(new Vector2(feet.X, headY), 13, outline);
+    Raylib.DrawCircleV(new Vector2(feet.X, headY), 10, new Color(255, 205, 157, 255));
+    Raylib.DrawCircleV(new Vector2(feet.X + direction * 4, headY - 1), 2, Color.Black);
+    Raylib.DrawCircleV(new Vector2(feet.X + direction * 8, headY + 4), 1.5f, new Color(155, 75, 65, 255));
+    Raylib.DrawLineEx(new Vector2(feet.X - 5, headY - 10), new Vector2(feet.X + 2, headY - 15), 3, outline);
+}
+
+void DrawOverlay(string title, string subtitle)
+{
+    Raylib.DrawRectangle(0, 0, screenWidth, screenHeight, new Color(15, 27, 45, 175));
+    int titleWidth = Raylib.MeasureText(title, 42);
+    int subtitleWidth = Raylib.MeasureText(subtitle, 21);
+    Raylib.DrawText(title, screenWidth / 2 - titleWidth / 2, 250, 42, new Color(255, 218, 100, 255));
+    Raylib.DrawText(subtitle, screenWidth / 2 - subtitleWidth / 2, 315, 21, Color.White);
+}
+
+class Enemy
+{
+    public Vector2 Position;
+    public bool IsSquashed;
+    public float Direction = 1f;
+    public float Speed = 115f;
+    public float BobTime;
+
+    private readonly float startX;
+    private readonly float endX;
+    private readonly float startY;
+
+    public Enemy(float startX, float endX, float startY)
+    {
+        this.startX = startX;
+        this.endX = endX;
+        this.startY = startY;
+        Reset();
+    }
+
+    public void Reset()
+    {
+        Position = new Vector2(startX, startY);
+        IsSquashed = false;
+        Direction = 1f;
+        BobTime = 0f;
+    }
+
+    public void Update(float dt)
+    {
+        if (IsSquashed) return;
+
+        Position.X += Speed * Direction * dt;
+        if (Position.X >= endX)
+        {
+            Position.X = endX;
+            Direction = -1f;
+        }
+        else if (Position.X <= startX)
+        {
+            Position.X = startX;
+            Direction = 1f;
+        }
+
+        BobTime += dt;
+    }
+}
+
+class Level
+{
+    public float WorldWidth;
+    public float GoalX;
+    public Vector2 StartPos;
+    public Rectangle[] Platforms = Array.Empty<Rectangle>();
+    public Rectangle[] Spikes = Array.Empty<Rectangle>();
+    public List<Enemy> Enemies = new();
 }
