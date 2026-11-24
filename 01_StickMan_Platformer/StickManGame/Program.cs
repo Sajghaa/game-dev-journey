@@ -17,6 +17,7 @@ Raylib.SetExitKey(KeyboardKey.Null);
 
 int deaths = 0;
 int currentLevelIndex = 0;
+int score = 0;
 bool hasWon = false;
 bool isPaused = false;
 GameState gameState = GameState.Menu;
@@ -49,6 +50,14 @@ List<Level> levels = new()
             new(650, 950, groundY - 22),
             new(1450, 1700, groundY - 22),
             new(2450, 2750, groundY - 22)
+        },
+        // NEW: Level 1 Coins
+        Coins = new List<Coin>
+        {
+            new(new Vector2(350, 400)), new(new Vector2(600, 310)),
+            new(new Vector2(900, 400)), new(new Vector2(1100, 480)), // Over the spikes!
+            new(new Vector2(1400, 380)), new(new Vector2(1680, 290)),
+            new(new Vector2(2000, 380)), new(new Vector2(2400, 320))
         }
     },
     new Level
@@ -80,12 +89,21 @@ List<Level> levels = new()
             new(1150, 1350, groundY - 22),
             new(2200, 2450, groundY - 22),
             new(2850, 3100, groundY - 22)
+        },
+        // NEW: Level 2 Coins
+        Coins = new List<Coin>
+        {
+            new(new Vector2(280, 410)), new(new Vector2(500, 320)),
+            new(new Vector2(730, 230)), new(new Vector2(900, 480)),
+            new(new Vector2(1150, 390)), new(new Vector2(1480, 300)),
+            new(new Vector2(1750, 210)), new(new Vector2(1900, 480)),
+            new(new Vector2(2200, 380)), new(new Vector2(2550, 290))
         }
     }
 };
 
 Level currentLevel = levels[currentLevelIndex];
-Vector2 position = currentLevel.StartPos; // Player position is the centre of the feet.
+Vector2 position = currentLevel.StartPos;
 float velocityY = 0f;
 float walkTime = 0f;
 float jumpSquash = 0f;
@@ -118,7 +136,9 @@ while (!Raylib.WindowShouldClose())
             hasWon = false;
             isPaused = false;
             deaths = 0;
+            score = 0;
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            foreach (Coin coin in currentLevel.Coins) coin.Reset();
             gameState = GameState.Playing;
         }
 
@@ -130,7 +150,10 @@ while (!Raylib.WindowShouldClose())
             velocityY = 0f;
             hasWon = false;
             isPaused = false;
+            deaths = 0;
+            score = 0;
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            foreach (Coin coin in currentLevel.Coins) coin.Reset();
             gameState = GameState.Playing;
         }
         else if (IsButtonClicked(new Rectangle(390, 375, 220, 58), mouse))
@@ -155,7 +178,9 @@ while (!Raylib.WindowShouldClose())
             velocityY = 0f;
             hasWon = false;
             isPaused = false;
+            score = 0;
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            foreach (Coin coin in currentLevel.Coins) coin.Reset();
             gameState = GameState.Playing;
         }
         else if (IsButtonClicked(new Rectangle(520, 285, 180, 100), mouse) || Raylib.IsKeyPressed(KeyboardKey.Two))
@@ -166,7 +191,9 @@ while (!Raylib.WindowShouldClose())
             velocityY = 0f;
             hasWon = false;
             isPaused = false;
+            score = 0;
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            foreach (Coin coin in currentLevel.Coins) coin.Reset();
             gameState = GameState.Playing;
         }
     }
@@ -203,7 +230,9 @@ while (!Raylib.WindowShouldClose())
             position = currentLevel.StartPos;
             velocityY = 0f;
             hasWon = false;
+            // Don't reset score here, so it carries over to the next level!
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            foreach (Coin coin in currentLevel.Coins) coin.Reset();
         }
     }
     else if (gameState == GameState.Playing && !isPaused && !hasWon)
@@ -303,6 +332,7 @@ while (!Raylib.WindowShouldClose())
                 {
                     enemy.IsSquashed = true;
                     velocityY = -440f;
+                    score += 50; // Reward for stomping!
                 }
                 else
                 {
@@ -311,16 +341,33 @@ while (!Raylib.WindowShouldClose())
             }
         }
 
+        // NEW: Coin Collision
+        foreach (Coin coin in currentLevel.Coins)
+        {
+            if (coin.IsCollected) continue;
+            float dist = Vector2.Distance(position, coin.Position);
+            if (dist < 45f) // The player is 72px tall, so 45f catches the body nicely
+            {
+                coin.IsCollected = true;
+                score += 10; // 10 points per coin!
+            }
+        }
+
         if (hitHazard)
         {
             position = currentLevel.StartPos;
             velocityY = 0f;
             deaths++;
+            score = 0; // Reset score on death
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+            foreach (Coin coin in currentLevel.Coins) coin.Reset();
         }
 
         foreach (Enemy enemy in currentLevel.Enemies)
             enemy.Update(dt);
+            
+        foreach (Coin coin in currentLevel.Coins)
+            coin.Update(dt);
 
         if (position.X >= currentLevel.GoalX - 28f && position.Y >= groundY - 2f)
             hasWon = true;
@@ -348,7 +395,8 @@ while (!Raylib.WindowShouldClose())
     }
     else
     {
-        DrawSkyAndHud(currentLevelIndex + 1, deaths, currentLevel, position.X);
+        // Pass score to HUD
+        DrawSkyAndHud(currentLevelIndex + 1, deaths, currentLevel, position.X, score);
 
         Raylib.BeginMode2D(camera);
         DrawCartoonBackground(currentLevel.WorldWidth);
@@ -360,6 +408,8 @@ while (!Raylib.WindowShouldClose())
             DrawCartoonSpikes(spike);
         foreach (Enemy enemy in currentLevel.Enemies)
             DrawEnemy(enemy);
+        foreach (Coin coin in currentLevel.Coins) // Draw Coins
+            DrawCoin(coin);
 
         DrawGoal(currentLevel.GoalX);
         DrawStickMan(position, walkTime, velocityY < 0f, isFacingRight, jumpSquash);
@@ -459,15 +509,15 @@ void DrawHowToPlay()
     Raylib.DrawText("MOVE       A / D  or  LEFT / RIGHT", 295, 245, 21, Color.White);
     Raylib.DrawText("JUMP       SPACE / W / UP", 295, 295, 21, Color.White);
     Raylib.DrawText("PAUSE      P", 295, 345, 21, Color.White);
-    Raylib.DrawText("STOMP ENEMIES FROM ABOVE!", 295, 395, 19, new Color(255, 218, 100, 255));
+    Raylib.DrawText("STOMP ENEMIES & COLLECT COINS!", 295, 395, 19, new Color(255, 218, 100, 255));
     DrawMenuButton("BACK", new Rectangle(390, 500, 220, 55), Raylib.GetMousePosition());
 }
 
-void DrawSkyAndHud(int levelNumber, int deathCount, Level level, float playerX)
+// Updated to include score
+void DrawSkyAndHud(int levelNumber, int deathCount, Level level, float playerX, int currentScore)
 {
     Raylib.ClearBackground(new Color(116, 205, 255, 255));
 
-    // Soft sun and clouds are drawn in screen space.
     Raylib.DrawCircle(870, 95, 42, new Color(255, 226, 112, 255));
     DrawCloud(140, 105, 1f);
     DrawCloud(440, 75, 0.75f);
@@ -475,11 +525,12 @@ void DrawSkyAndHud(int levelNumber, int deathCount, Level level, float playerX)
 
     Raylib.DrawRectangle(0, 0, screenWidth, 12, new Color(255, 255, 255, 70));
 
-    // HUD panel
-    Raylib.DrawRectangle(18, 18, 245, 82, new Color(25, 55, 82, 220));
+    // HUD panel (Made taller to fit score)
+    Raylib.DrawRectangle(18, 18, 245, 110, new Color(25, 55, 82, 220));
     Raylib.DrawRectangle(18, 18, 245, 7, new Color(255, 210, 75, 255));
     Raylib.DrawText($"LEVEL {levelNumber}", 34, 34, 23, Color.White);
     Raylib.DrawText($"FALLS: {deathCount}", 35, 66, 18, new Color(255, 180, 180, 255));
+    Raylib.DrawText($"SCORE: {currentScore}", 35, 92, 18, new Color(255, 215, 0, 255)); // Gold text
 
     // Progress bar
     float progress = Math.Clamp(playerX / level.GoalX, 0f, 1f);
@@ -500,7 +551,6 @@ void DrawCloud(float x, float y, float scale)
 
 void DrawCartoonBackground(float worldWidth)
 {
-    // Distant rolling hills.
     for (int i = 0; i < (int)(worldWidth / 420f) + 2; i++)
     {
         float x = i * 420f;
@@ -508,7 +558,6 @@ void DrawCartoonBackground(float worldWidth)
         Raylib.DrawCircleV(new Vector2(x + 310, groundY - 45), 125, new Color(92, 174, 105, 255));
     }
 
-    // Little decorative flowers along the ground.
     for (int i = 0; i < (int)(worldWidth / 170f); i++)
     {
         float x = i * 170f + 55f;
@@ -590,6 +639,25 @@ void DrawEnemy(Enemy enemy)
     Raylib.DrawCircleV(new Vector2(x + 13, y - 13 + bob), 3, new Color(255, 145, 145, 255));
 }
 
+// NEW: Draw Coin Function
+void DrawCoin(Coin coin)
+{
+    if (coin.IsCollected) return;
+
+    float spinScale = Math.Abs((float)Math.Cos(coin.AnimTime));
+    Vector2 pos = coin.Position;
+    float bob = (float)Math.Sin(coin.AnimTime * 0.5f) * 4f;
+
+    Raylib.DrawEllipse((int)pos.X, (int)(pos.Y + 15), 10, 4, new Color(35, 67, 55, 75));
+    Raylib.DrawEllipse((int)pos.X, (int)(pos.Y + bob), 12 * spinScale, 14, new Color(255, 215, 0, 255));
+    Raylib.DrawEllipseLines((int)pos.X, (int)(pos.Y + bob), 12 * spinScale, 14, new Color(184, 134, 11, 255));
+    
+    if (spinScale > 0.5f) 
+    {
+        Raylib.DrawCircle((int)(pos.X - (3 * spinScale)), (int)(pos.Y - 5 + bob), 2, Color.White);
+    }
+}
+
 void DrawGoal(float goalX)
 {
     Raylib.DrawLineEx(new Vector2(goalX, groundY), new Vector2(goalX, groundY - 145), 7, new Color(92, 75, 59, 255));
@@ -614,7 +682,6 @@ void DrawStickMan(Vector2 feet, float walkTime, bool jumping, bool facingRight, 
 
     Raylib.DrawEllipse((int)feet.X, (int)(feet.Y + 2), 17, 5, new Color(35, 67, 55, 75));
 
-    // Legs animate in opposite directions.
     float legSwing = jumping ? 9f : (float)Math.Sin(walkTime) * 11f;
     Vector2 leftHip = new(feet.X - 4, hipY);
     Vector2 rightHip = new(feet.X + 4, hipY);
@@ -630,7 +697,6 @@ void DrawStickMan(Vector2 feet, float walkTime, bool jumping, bool facingRight, 
     Raylib.DrawLineEx(leftHip, leftFoot, 3, body);
     Raylib.DrawLineEx(rightHip, rightFoot, 3, body);
 
-    // Torso and arms.
     Raylib.DrawLineEx(new Vector2(feet.X, shoulderY), new Vector2(feet.X, hipY), 9, outline);
     Raylib.DrawLineEx(new Vector2(feet.X, shoulderY), new Vector2(feet.X, hipY), 5, body);
 
@@ -648,7 +714,6 @@ void DrawStickMan(Vector2 feet, float walkTime, bool jumping, bool facingRight, 
     Raylib.DrawLineEx(new Vector2(feet.X - 2, shoulderY + 2), leftHand, 3, body);
     Raylib.DrawLineEx(new Vector2(feet.X + 2, shoulderY + 2), rightHand, 3, body);
 
-    // Head, face and hair tuft.
     Raylib.DrawCircleV(new Vector2(feet.X, headY), 13, outline);
     Raylib.DrawCircleV(new Vector2(feet.X, headY), 10, new Color(255, 205, 157, 255));
     Raylib.DrawCircleV(new Vector2(feet.X + direction * 4, headY - 1), 2, Color.Black);
@@ -729,4 +794,29 @@ class Level
     public Rectangle[] Platforms = Array.Empty<Rectangle>();
     public Rectangle[] Spikes = Array.Empty<Rectangle>();
     public List<Enemy> Enemies = new();
+    public List<Coin> Coins = new();
+}
+
+class Coin
+{
+    public Vector2 Position;
+    public bool IsCollected;
+    public float AnimTime;
+
+    public Coin(Vector2 position)
+    {
+        Position = position;
+        IsCollected = false;
+        AnimTime = 0f;
+    }
+
+    public void Reset()
+    {
+        IsCollected = false;
+    }
+
+    public void Update(float dt)
+    {
+        if (!IsCollected) AnimTime += dt * 6f; // Speed of the spin
+    }
 }
