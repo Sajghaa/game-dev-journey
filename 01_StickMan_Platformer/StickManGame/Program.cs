@@ -13,6 +13,8 @@ const float moveSpeed = 280f;
 Raylib.InitWindow(screenWidth, screenHeight, "Stick Man Adventure");
 Raylib.SetTargetFPS(60);
 
+Raylib.SetExitKey(KeyboardKey.Null); 
+
 int deaths = 0;
 int currentLevelIndex = 0;
 bool hasWon = false;
@@ -115,6 +117,7 @@ while (!Raylib.WindowShouldClose())
             velocityY = 0f;
             hasWon = false;
             isPaused = false;
+            deaths = 0;
             foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
             gameState = GameState.Playing;
         }
