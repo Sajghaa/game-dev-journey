@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO; // Needed to check if audio files exist
+using System.IO;
 using System.Numerics;
 using Raylib_cs;
 
@@ -11,11 +11,10 @@ const float gravity = 1500f;
 const float jumpForce = -650f;
 const float moveSpeed = 280f;
 
-Raylib.InitWindow(screenWidth, screenHeight, "Stick Man Adventure - Complete!");
+Raylib.InitWindow(screenWidth, screenHeight, "Stick Man Adventure - Health Update!");
 Raylib.SetTargetFPS(60);
 Raylib.SetExitKey(KeyboardKey.Null); 
 
-// NEW: Initialize Audio Device
 Raylib.InitAudioDevice(); 
 
 int deaths = 0;
@@ -25,13 +24,15 @@ bool hasWon = false;
 bool isPaused = false;
 GameState gameState = GameState.Menu;
 
-// NEW: Audio Loading with Safe Fallbacks
+// NEW: Player Health & Invincibility
+int playerHealth = 3;
+float invincibilityTimer = 0f;
+
 Sound jumpSound = LoadSoundSafe("jump.wav");
 Sound coinSound = LoadSoundSafe("coin.wav");
 Sound stompSound = LoadSoundSafe("stomp.wav");
 Music bgm = LoadMusicSafe("bgm.mp3");
 
-// NEW: Screen Shake Variables
 float shakeTime = 0f;
 float shakeIntensity = 0f;
 
@@ -68,12 +69,9 @@ float walkTime = 0f;
 float jumpSquash = 0f;
 bool isFacingRight = true;
 
-// NEW: Particles List
 List<Particle> particles = new();
-
 Camera2D camera = new() { Offset = new Vector2(screenWidth / 2f, screenHeight / 2f), Target = new Vector2(screenWidth / 2f, screenHeight / 2f), Rotation = 0f, Zoom = 1f };
 
-// NEW: Start Background Music
 if (bgm.FrameCount > 0) Raylib.PlayMusicStream(bgm);
 
 while (!Raylib.WindowShouldClose())
@@ -81,8 +79,10 @@ while (!Raylib.WindowShouldClose())
     float dt = Math.Min(Raylib.GetFrameTime(), 0.033f);
     Vector2 mouse = Raylib.GetMousePosition();
 
-    // NEW: Update Music Stream every frame
     if (bgm.FrameCount > 0) Raylib.UpdateMusicStream(bgm);
+
+    // NEW: Tick down invincibility timer
+    if (invincibilityTimer > 0f) invincibilityTimer -= dt;
 
     // ---------------- MENU NAVIGATION ----------------
     if (gameState == GameState.Menu)
@@ -117,10 +117,8 @@ while (!Raylib.WindowShouldClose())
     }
     else if (gameState == GameState.Playing && !isPaused && !hasWon)
     {
-        // Update moving platforms
         foreach (MovingPlatform mp in currentLevel.MovingPlatforms) mp.Update(dt);
 
-        // Player Movement
         float dx = 0f;
         if (Raylib.IsKeyDown(KeyboardKey.A) || Raylib.IsKeyDown(KeyboardKey.Left)) { dx -= 1f; isFacingRight = false; }
         if (Raylib.IsKeyDown(KeyboardKey.D) || Raylib.IsKeyDown(KeyboardKey.Right)) { dx += 1f; isFacingRight = true; }
@@ -136,16 +134,13 @@ while (!Raylib.WindowShouldClose())
             if (Raylib.CheckCollisionRecs(playerFeet, new Rectangle(platform.X, platform.Y - 4f, platform.Width, 8f))) onGround = true;
 
         foreach (MovingPlatform mp in currentLevel.MovingPlatforms)
-        {
             if (Raylib.CheckCollisionRecs(playerFeet, new Rectangle(mp.Bounds.X, mp.Bounds.Y - 4f, mp.Bounds.Width, 8f)))
             { onGround = true; position.X += mp.Delta.X; position.Y += mp.Delta.Y; }
-        }
 
         if (onGround && (Raylib.IsKeyPressed(KeyboardKey.Space) || Raylib.IsKeyPressed(KeyboardKey.W) || Raylib.IsKeyPressed(KeyboardKey.Up)))
         {
             velocityY = jumpForce;
             onGround = false;
-            // NEW: Play Jump Sound & Spawn Dust
             if (jumpSound.FrameCount > 0) Raylib.PlaySound(jumpSound);
             SpawnParticles(new Vector2(position.X, position.Y), Color.LightGray, 8, 100f);
         }
@@ -169,7 +164,6 @@ while (!Raylib.WindowShouldClose())
         if (dx != 0f && !inAir) walkTime += dt * 11f;
         jumpSquash += ((inAir ? 0.12f : 0f) - jumpSquash) * Math.Min(1f, dt * 8f);
 
-        // Collisions
         Rectangle playerRect = new(position.X - 14f, position.Y - 72f, 28f, 68f);
         bool hitHazard = false;
 
@@ -186,7 +180,6 @@ while (!Raylib.WindowShouldClose())
                 if (stomping && enemy.Type != EnemyType.Spiky) 
                 { 
                     enemy.IsSquashed = true; velocityY = -440f; score += 50; 
-                    // NEW: Stomp Sound & Particles
                     if (stompSound.FrameCount > 0) Raylib.PlaySound(stompSound);
                     SpawnParticles(enemy.Position, new Color(218, 75, 91, 255), 20, 250f);
                 }
@@ -205,7 +198,6 @@ while (!Raylib.WindowShouldClose())
                 {
                     currentLevel.Boss.TakeDamage();
                     velocityY = -550f;
-                    // NEW: Boss Hit Shake & Sound
                     shakeTime = 0.3f; shakeIntensity = 15f;
                     if (stompSound.FrameCount > 0) Raylib.PlaySound(stompSound);
                     SpawnParticles(currentLevel.Boss.Position, Color.Gold, 30, 300f);
@@ -221,7 +213,6 @@ while (!Raylib.WindowShouldClose())
             if (!coin.IsCollected && Vector2.Distance(position, coin.Position) < 45f) 
             { 
                 coin.IsCollected = true; score += 10; 
-                // NEW: Coin Sound & Sparkles
                 if (coinSound.FrameCount > 0) Raylib.PlaySound(coinSound);
                 SpawnParticles(coin.Position, Color.Gold, 12, 150f);
             }
@@ -229,22 +220,29 @@ while (!Raylib.WindowShouldClose())
 
         foreach (Checkpoint cp in currentLevel.Checkpoints)
             if (!cp.IsActivated && Math.Abs(position.X - cp.Position.X) < 30f && Math.Abs(position.Y - cp.Position.Y) < 70f)
-            {
-                cp.IsActivated = true;
-                respawnPosition = new Vector2(cp.Position.X, groundY);
-            }
+            { cp.IsActivated = true; respawnPosition = new Vector2(cp.Position.X, groundY); }
 
-        if (hitHazard)
+        // NEW: PLAYER HEALTH LOGIC
+        if (hitHazard && invincibilityTimer <= 0f)
         {
-            position = respawnPosition;
-            velocityY = 0f;
-            deaths++;
-            // NEW: Massive Shake on Death
-            shakeTime = 0.4f; shakeIntensity = 20f;
-            SpawnParticles(position, Color.Red, 25, 200f);
-            
-            foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
-            if (currentLevel.Boss != null) currentLevel.Boss.Projectiles.Clear(); 
+            playerHealth--;
+            invincibilityTimer = 1.5f; // 1.5 seconds of blinking invincibility
+            shakeTime = 0.2f; shakeIntensity = 10f;
+            SpawnParticles(position, Color.Red, 15, 200f);
+
+            if (playerHealth <= 0)
+            {
+                // Player Died
+                position = respawnPosition;
+                velocityY = 0f;
+                deaths++;
+                playerHealth = 3; // Reset health
+                invincibilityTimer = 2.0f; // Longer invincibility upon respawn
+                shakeTime = 0.5f; shakeIntensity = 25f;
+                
+                foreach (Enemy enemy in currentLevel.Enemies) enemy.Reset();
+                if (currentLevel.Boss != null) currentLevel.Boss.Projectiles.Clear(); 
+            }
         }
 
         foreach (Enemy enemy in currentLevel.Enemies) enemy.Update(dt);
@@ -254,14 +252,12 @@ while (!Raylib.WindowShouldClose())
         if (bossDefeated && position.X >= currentLevel.GoalX - 28f && position.Y >= groundY - 2f) hasWon = true;
     }
 
-    // NEW: Update Particles
     for (int i = particles.Count - 1; i >= 0; i--)
     {
         particles[i].Update(dt);
         if (particles[i].Life <= 0) particles.RemoveAt(i);
     }
 
-    // NEW: Camera Shake Logic
     if (shakeTime > 0f)
     {
         shakeTime -= dt;
@@ -269,10 +265,7 @@ while (!Raylib.WindowShouldClose())
         float offsetY = (float)(Random.Shared.NextDouble() * 2 - 1) * shakeIntensity;
         camera.Offset = new Vector2(screenWidth / 2f + offsetX, screenHeight / 2f + offsetY);
     }
-    else
-    {
-        camera.Offset = new Vector2(screenWidth / 2f, screenHeight / 2f);
-    }
+    else camera.Offset = new Vector2(screenWidth / 2f, screenHeight / 2f);
 
     float cameraX = Math.Clamp(position.X, screenWidth / 2f, currentLevel.WorldWidth - screenWidth / 2f);
     camera.Target = Vector2.Lerp(camera.Target, new Vector2(cameraX, position.Y - 100f), 0.10f);
@@ -304,11 +297,14 @@ while (!Raylib.WindowShouldClose())
             foreach (Projectile p in currentLevel.Boss.Projectiles) DrawProjectile(p);
         }
 
-        // NEW: Draw Particles
         foreach (Particle p in particles) p.Draw();
 
         DrawGoal(currentLevel.GoalX, currentLevel.Boss == null || currentLevel.Boss.IsDead);
-        DrawStickMan(position, walkTime, velocityY < 0f, isFacingRight, jumpSquash);
+        
+        // NEW: Blink the player if invincible
+        bool drawPlayer = invincibilityTimer <= 0f || (int)(invincibilityTimer * 15f) % 2 == 0;
+        if (drawPlayer) DrawStickMan(position, walkTime, velocityY < 0f, isFacingRight, jumpSquash);
+        
         Raylib.EndMode2D();
 
         if (currentLevel.Boss != null && !currentLevel.Boss.IsDead && position.X > 2600) DrawBossHealthBar(currentLevel.Boss);
@@ -319,7 +315,6 @@ while (!Raylib.WindowShouldClose())
     Raylib.EndDrawing();
 }
 
-// NEW: Unload Audio & Close Device
 if (jumpSound.FrameCount > 0) Raylib.UnloadSound(jumpSound);
 if (coinSound.FrameCount > 0) Raylib.UnloadSound(coinSound);
 if (stompSound.FrameCount > 0) Raylib.UnloadSound(stompSound);
@@ -327,19 +322,10 @@ if (bgm.FrameCount > 0) Raylib.UnloadMusicStream(bgm);
 Raylib.CloseAudioDevice();
 Raylib.CloseWindow();
 
-// ---------------- AUDIO HELPERS ----------------
-Sound LoadSoundSafe(string path)
-{
-    if (File.Exists(path)) return Raylib.LoadSound(path);
-    return new Sound(); // Returns an empty sound if file is missing
-}
-Music LoadMusicSafe(string path)
-{
-    if (File.Exists(path)) return Raylib.LoadMusicStream(path);
-    return new Music();
-}
+// ---------------- HELPERS ----------------
+Sound LoadSoundSafe(string path) => File.Exists(path) ? Raylib.LoadSound(path) : new Sound();
+Music LoadMusicSafe(string path) => File.Exists(path) ? Raylib.LoadMusicStream(path) : new Music();
 
-// ---------------- PARTICLE SYSTEM ----------------
 void SpawnParticles(Vector2 pos, Color color, int count, float force)
 {
     for (int i = 0; i < count; i++)
@@ -351,16 +337,25 @@ void SpawnParticles(Vector2 pos, Color color, int count, float force)
     }
 }
 
-// ---------------- EXISTING HELPERS (Collapsed for brevity, keep your current ones) ----------------
 void ResetLevel(Level level)
 {
     currentLevel = level; position = level.StartPos; respawnPosition = level.StartPos;
     velocityY = 0f; hasWon = false; isPaused = false; deaths = 0; score = 0;
+    playerHealth = 3; invincibilityTimer = 0f; // Reset Health
     foreach (Enemy enemy in level.Enemies) enemy.Reset();
     foreach (Coin coin in level.Coins) coin.Reset();
     foreach (Checkpoint cp in level.Checkpoints) cp.IsActivated = false;
     if (level.Boss != null) level.Boss.Reset();
     particles.Clear();
+}
+
+// NEW: Draw Heart Function
+void DrawHeart(int x, int y, bool isFull)
+{
+    Color c = isFull ? new Color(220, 50, 50, 255) : new Color(80, 80, 80, 255);
+    Raylib.DrawCircle(x - 6, y - 6, 7, c);
+    Raylib.DrawCircle(x + 6, y - 6, 7, c);
+    Raylib.DrawTriangle(new Vector2(x - 13, y - 2), new Vector2(x + 13, y - 2), new Vector2(x, y + 12), c);
 }
 
 void DrawBossHealthBar(Boss boss)
@@ -370,29 +365,33 @@ void DrawBossHealthBar(Boss boss)
     Raylib.DrawRectangle(screenWidth / 2 - 146, 49, (boss.Health * 73) - 8, 17, new Color(220, 50, 50, 255));
     Raylib.DrawRectangleLines(screenWidth / 2 - 150, 45, 300, 25, Color.White);
 }
+
 void DrawProjectile(Projectile p) { Raylib.DrawCircleV(p.Position, p.Radius, new Color(255, 100, 0, 255)); Raylib.DrawCircleV(p.Position, p.Radius - 3, new Color(255, 220, 50, 255)); }
+
 void DrawSkyAndHud(int levelNumber, int deathCount, Level level, float playerX, int currentScore)
 {
     Raylib.ClearBackground(new Color(116, 205, 255, 255));
     Raylib.DrawCircle(870, 95, 42, new Color(255, 226, 112, 255));
     DrawCloud(140, 105, 1f); DrawCloud(440, 75, 0.75f); DrawCloud(700, 165, 0.9f);
-    Raylib.DrawRectangle(18, 18, 245, 110, new Color(25, 55, 82, 220));
+    Raylib.DrawRectangle(18, 18, 245, 135, new Color(25, 55, 82, 220)); // Made taller for hearts
     Raylib.DrawRectangle(18, 18, 245, 7, new Color(255, 210, 75, 255));
     Raylib.DrawText($"LEVEL {levelNumber}", 34, 34, 23, Color.White);
     Raylib.DrawText($"FALLS: {deathCount}", 35, 66, 18, new Color(255, 180, 180, 255));
     Raylib.DrawText($"SCORE: {currentScore}", 35, 92, 18, new Color(255, 215, 0, 255));
+    
+    // Draw Health Hearts
+    for (int i = 0; i < 3; i++)
+        DrawHeart(45 + (i * 35), 130, i < playerHealth);
+
     float progress = Math.Clamp(playerX / level.GoalX, 0f, 1f);
     Raylib.DrawRectangle(700, 32, 260, 18, new Color(25, 55, 82, 210));
     Raylib.DrawRectangle(704, 36, (int)(252 * progress), 10, new Color(255, 210, 75, 255));
     Raylib.DrawText("ADVENTURE PROGRESS", 700, 12, 15, Color.White);
 }
+
 void DrawMovingPlatform(MovingPlatform mp) { Raylib.DrawRectangleRec(mp.Bounds, new Color(120, 80, 160, 255)); Raylib.DrawRectangle((int)mp.Bounds.X, (int)mp.Bounds.Y, (int)mp.Bounds.Width, 6, new Color(160, 120, 200, 255)); }
-void DrawCheckpoint(Checkpoint cp)
-{
-    Color poleColor = new Color(100, 100, 100, 255), flagColor = cp.IsActivated ? new Color(255, 215, 0, 255) : new Color(150, 150, 150, 255);
-    Raylib.DrawLineEx(new Vector2(cp.Position.X, cp.Position.Y), new Vector2(cp.Position.X, cp.Position.Y - 100), 5, poleColor);
-    Raylib.DrawTriangle(new Vector2(cp.Position.X, cp.Position.Y - 95), new Vector2(cp.Position.X + 45, cp.Position.Y - 75), new Vector2(cp.Position.X, cp.Position.Y - 55), flagColor);
-}
+void DrawCheckpoint(Checkpoint cp) { Color pole = new(100, 100, 100, 255), flag = cp.IsActivated ? new Color(255, 215, 0, 255) : new Color(150, 150, 150, 255); Raylib.DrawLineEx(new Vector2(cp.Position.X, cp.Position.Y), new Vector2(cp.Position.X, cp.Position.Y - 100), 5, pole); Raylib.DrawTriangle(new Vector2(cp.Position.X, cp.Position.Y - 95), new Vector2(cp.Position.X + 45, cp.Position.Y - 75), new Vector2(cp.Position.X, cp.Position.Y - 55), flag); }
+
 void DrawEnemy(Enemy enemy)
 {
     float x = enemy.Position.X, y = enemy.Position.Y;
@@ -405,30 +404,12 @@ void DrawEnemy(Enemy enemy)
     float eyeDirection = enemy.Direction >= 0 ? 1f : -1f;
     Raylib.DrawCircleV(new Vector2(x - 6 + eyeDirection * 2, y - 23 + bob), 2.4f, Color.Black); Raylib.DrawCircleV(new Vector2(x + 6 + eyeDirection * 2, y - 23 + bob), 2.4f, Color.Black);
 }
-void DrawCoin(Coin coin)
-{
-    if (coin.IsCollected) return;
-    float spinScale = Math.Abs((float)Math.Cos(coin.AnimTime)); Vector2 pos = coin.Position; float bob = (float)Math.Sin(coin.AnimTime * 0.5f) * 4f;
-    Raylib.DrawEllipse((int)pos.X, (int)(pos.Y + 15), 10, 4, new Color(35, 67, 55, 75)); Raylib.DrawEllipse((int)pos.X, (int)(pos.Y + bob), 12 * spinScale, 14, new Color(255, 215, 0, 255));
-    Raylib.DrawEllipseLines((int)pos.X, (int)(pos.Y + bob), 12 * spinScale, 14, new Color(184, 134, 11, 255));
-}
-void DrawGrassPlatform(Rectangle platform)
-{
-    Raylib.DrawRectangleRec(platform, new Color(151, 91, 51, 255)); Raylib.DrawRectangle((int)platform.X, (int)platform.Y, (int)platform.Width, 9, new Color(66, 181, 76, 255)); Raylib.DrawRectangle((int)platform.X, (int)platform.Y + 9, (int)platform.Width, 4, new Color(45, 145, 59, 255));
-}
-void DrawCartoonSpikes(Rectangle area)
-{
-    int count = Math.Max(1, (int)(area.Width / 24f)); float width = area.Width / count;
-    for (int i = 0; i < count; i++)
-    { Vector2 left = new(area.X + i * width, area.Y + area.Height), top = new(area.X + i * width + width / 2f, area.Y + 2), right = new(area.X + (i + 1) * width, area.Y + area.Height); Raylib.DrawTriangle(left, top, right, new Color(239, 76, 75, 255)); Raylib.DrawLineEx(left, top, 2, new Color(255, 160, 145, 255)); Raylib.DrawLineEx(top, right, 2, new Color(166, 43, 48, 255)); }
-}
-void DrawGoal(float goalX, bool isUnlocked)
-{
-    Color poleColor = isUnlocked ? new Color(92, 75, 59, 255) : new Color(80, 80, 80, 255), flagColor = isUnlocked ? new Color(255, 190, 55, 255) : new Color(150, 150, 150, 255);
-    Raylib.DrawLineEx(new Vector2(goalX, groundY), new Vector2(goalX, groundY - 145), 7, poleColor); Raylib.DrawCircle((int)goalX, (int)(groundY - 148), 7, flagColor);
-    Raylib.DrawTriangle(new Vector2(goalX + 4, groundY - 140), new Vector2(goalX + 78, groundY - 119), new Vector2(goalX + 4, groundY - 96), flagColor);
-    if (!isUnlocked) Raylib.DrawText("LOCKED", (int)goalX - 15, (int)groundY - 170, 16, Color.Red);
-}
+
+void DrawCoin(Coin coin) { if (coin.IsCollected) return; float spinScale = Math.Abs((float)Math.Cos(coin.AnimTime)); Vector2 pos = coin.Position; float bob = (float)Math.Sin(coin.AnimTime * 0.5f) * 4f; Raylib.DrawEllipse((int)pos.X, (int)(pos.Y + 15), 10, 4, new Color(35, 67, 55, 75)); Raylib.DrawEllipse((int)pos.X, (int)(pos.Y + bob), 12 * spinScale, 14, new Color(255, 215, 0, 255)); Raylib.DrawEllipseLines((int)pos.X, (int)(pos.Y + bob), 12 * spinScale, 14, new Color(184, 134, 11, 255)); }
+void DrawGrassPlatform(Rectangle platform) { Raylib.DrawRectangleRec(platform, new Color(151, 91, 51, 255)); Raylib.DrawRectangle((int)platform.X, (int)platform.Y, (int)platform.Width, 9, new Color(66, 181, 76, 255)); Raylib.DrawRectangle((int)platform.X, (int)platform.Y + 9, (int)platform.Width, 4, new Color(45, 145, 59, 255)); }
+void DrawCartoonSpikes(Rectangle area) { int count = Math.Max(1, (int)(area.Width / 24f)); float width = area.Width / count; for (int i = 0; i < count; i++) { Vector2 left = new(area.X + i * width, area.Y + area.Height), top = new(area.X + i * width + width / 2f, area.Y + 2), right = new(area.X + (i + 1) * width, area.Y + area.Height); Raylib.DrawTriangle(left, top, right, new Color(239, 76, 75, 255)); Raylib.DrawLineEx(left, top, 2, new Color(255, 160, 145, 255)); Raylib.DrawLineEx(top, right, 2, new Color(166, 43, 48, 255)); } }
+void DrawGoal(float goalX, bool isUnlocked) { Color pole = isUnlocked ? new Color(92, 75, 59, 255) : new Color(80, 80, 80, 255), flag = isUnlocked ? new Color(255, 190, 55, 255) : new Color(150, 150, 150, 255); Raylib.DrawLineEx(new Vector2(goalX, groundY), new Vector2(goalX, groundY - 145), 7, pole); Raylib.DrawCircle((int)goalX, (int)(groundY - 148), 7, flag); Raylib.DrawTriangle(new Vector2(goalX + 4, groundY - 140), new Vector2(goalX + 78, groundY - 119), new Vector2(goalX + 4, groundY - 96), flag); if (!isUnlocked) Raylib.DrawText("LOCKED", (int)goalX - 15, (int)groundY - 170, 16, Color.Red); }
+
 void DrawStickMan(Vector2 feet, float walkTime, bool jumping, bool facingRight, float squash)
 {
     Color outline = new(24, 34, 48, 255), body = new(36, 48, 68, 255); float direction = facingRight ? 1f : -1f, bob = jumping ? -2f : (float)Math.Sin(walkTime * 2f) * 2f;
@@ -441,13 +422,14 @@ void DrawStickMan(Vector2 feet, float walkTime, bool jumping, bool facingRight, 
     Raylib.DrawLineEx(new Vector2(feet.X - 2, shoulderY + 2), leftHand, 6, outline); Raylib.DrawLineEx(new Vector2(feet.X + 2, shoulderY + 2), rightHand, 6, outline); Raylib.DrawLineEx(new Vector2(feet.X - 2, shoulderY + 2), leftHand, 3, body); Raylib.DrawLineEx(new Vector2(feet.X + 2, shoulderY + 2), rightHand, 3, body);
     Raylib.DrawCircleV(new Vector2(feet.X, headY), 13, outline); Raylib.DrawCircleV(new Vector2(feet.X, headY), 10, new Color(255, 205, 157, 255)); Raylib.DrawCircleV(new Vector2(feet.X + direction * 4, headY - 1), 2, Color.Black);
 }
+
 bool IsButtonClicked(Rectangle bounds, Vector2 mouse) => Raylib.IsMouseButtonPressed(MouseButton.Left) && Raylib.CheckCollisionPointRec(mouse, bounds);
 void DrawMenuButton(string label, Rectangle bounds, Vector2 mouse) { bool hovered = Raylib.CheckCollisionPointRec(mouse, bounds); Color fill = hovered ? new Color(255, 196, 75, 255) : new Color(255, 218, 116, 255); Raylib.DrawRectangleRounded(bounds, 0.28f, 8, new Color(113, 70, 45, 255)); Raylib.DrawRectangleRounded(new Rectangle(bounds.X + 3, bounds.Y + 3, bounds.Width - 6, bounds.Height - 7), 0.25f, 8, fill); Raylib.DrawText(label, (int)(bounds.X + (bounds.Width - Raylib.MeasureText(label, 23)) / 2), (int)(bounds.Y + 16), 23, new Color(64, 54, 50, 255)); }
 void DrawMenuScenery() { Raylib.ClearBackground(new Color(116, 205, 255, 255)); Raylib.DrawCircle(850, 105, 52, new Color(255, 226, 112, 255)); DrawCloud(135, 120, 1.15f); DrawCloud(760, 215, 0.85f); DrawCloud(420, 95, 0.7f); Raylib.DrawCircle(120, 610, 230, new Color(111, 190, 116, 255)); Raylib.DrawRectangle(0, 570, screenWidth, 80, new Color(65, 177, 75, 255)); Raylib.DrawRectangle(0, 585, screenWidth, 65, new Color(133, 83, 48, 255)); }
 void DrawCloud(float x, float y, float scale) { Color cloud = new(255, 255, 255, 235); Raylib.DrawCircleV(new Vector2(x, y), 23 * scale, cloud); Raylib.DrawCircleV(new Vector2(x + 25 * scale, y - 12 * scale), 30 * scale, cloud); Raylib.DrawCircleV(new Vector2(x + 55 * scale, y), 23 * scale, cloud); Raylib.DrawRectangle((int)(x - 2 * scale), (int)y, (int)(60 * scale), (int)(19 * scale), cloud); }
 void DrawMainMenu() { Vector2 mouse = Raylib.GetMousePosition(); DrawMenuScenery(); Raylib.DrawText("STICK MAN ADVENTURE", screenWidth / 2 - Raylib.MeasureText("STICK MAN ADVENTURE", 48) / 2, 110, 48, Color.White); DrawMenuButton("PLAY", new Rectangle(390, 260, 220, 58), mouse); DrawMenuButton("LEVEL SELECT", new Rectangle(390, 335, 220, 58), mouse); DrawMenuButton("HOW TO PLAY", new Rectangle(390, 410, 220, 58), mouse); DrawStickMan(new Vector2(255, 570), 2.4f, false, true, 0f); Raylib.DrawText("PRESS ENTER TO PLAY", 755, 620, 14, Color.White); }
 void DrawLevelSelect() { Vector2 mouse = Raylib.GetMousePosition(); DrawMenuScenery(); Raylib.DrawText("CHOOSE YOUR LEVEL", 300, 145, 38, Color.White); DrawMenuButton("< BACK", new Rectangle(30, 30, 145, 48), mouse); Rectangle first = new(300, 285, 180, 100), second = new(520, 285, 180, 100); Raylib.DrawRectangleRounded(first, 0.18f, 8, Raylib.CheckCollisionPointRec(mouse, first) ? new Color(255, 196, 75, 255) : new Color(255, 218, 116, 255)); Raylib.DrawRectangleRounded(second, 0.18f, 8, Raylib.CheckCollisionPointRec(mouse, second) ? new Color(255, 196, 75, 255) : new Color(255, 218, 116, 255)); Raylib.DrawText("LEVEL 1", 338, 310, 25, new Color(64, 54, 50, 255)); Raylib.DrawText("BEGINNER", 340, 345, 17, new Color(95, 75, 60, 255)); Raylib.DrawText("LEVEL 2", 558, 310, 25, new Color(64, 54, 50, 255)); Raylib.DrawText("BOSS FIGHT", 558, 345, 17, Color.Red); }
-void DrawHowToPlay() { DrawMenuScenery(); Raylib.DrawText("HOW TO PLAY", 365, 120, 40, Color.White); Raylib.DrawRectangleRounded(new Rectangle(250, 205, 500, 245), 0.08f, 10, new Color(25, 55, 82, 220)); Raylib.DrawText("MOVE       A / D  or  LEFT / RIGHT", 295, 245, 21, Color.White); Raylib.DrawText("JUMP       SPACE / W / UP", 295, 295, 21, Color.White); Raylib.DrawText("PAUSE      P", 295, 345, 21, Color.White); Raylib.DrawText("DEFEAT THE BOSS BY STOMPING HIM 3 TIMES!", 295, 395, 16, new Color(255, 218, 100, 255)); DrawMenuButton("BACK", new Rectangle(390, 500, 220, 55), Raylib.GetMousePosition()); }
+void DrawHowToPlay() { DrawMenuScenery(); Raylib.DrawText("HOW TO PLAY", 365, 120, 40, Color.White); Raylib.DrawRectangleRounded(new Rectangle(250, 205, 500, 245), 0.08f, 10, new Color(25, 55, 82, 220)); Raylib.DrawText("MOVE       A / D  or  LEFT / RIGHT", 295, 245, 21, Color.White); Raylib.DrawText("JUMP       SPACE / W / UP", 295, 295, 21, Color.White); Raylib.DrawText("PAUSE      P", 295, 345, 21, Color.White); Raylib.DrawText("YOU HAVE 3 HEARTS. STOMP THE BOSS!", 295, 395, 16, new Color(255, 218, 100, 255)); DrawMenuButton("BACK", new Rectangle(390, 500, 220, 55), Raylib.GetMousePosition()); }
 void DrawOverlay(string title, string subtitle) { Raylib.DrawRectangle(0, 0, screenWidth, screenHeight, new Color(15, 27, 45, 175)); Raylib.DrawText(title, screenWidth / 2 - Raylib.MeasureText(title, 42) / 2, 250, 42, new Color(255, 218, 100, 255)); Raylib.DrawText(subtitle, screenWidth / 2 - Raylib.MeasureText(subtitle, 21) / 2, 315, 21, Color.White); }
 void DrawCartoonBackground(float worldWidth) { for (int i = 0; i < (int)(worldWidth / 420f) + 2; i++) { float x = i * 420f; Raylib.DrawCircleV(new Vector2(x + 120, groundY - 55), 145, new Color(111, 190, 116, 255)); Raylib.DrawCircleV(new Vector2(x + 310, groundY - 45), 125, new Color(92, 174, 105, 255)); } }
 void DrawWorldGround(float worldWidth) { Raylib.DrawRectangle(0, (int)groundY, (int)worldWidth, 120, new Color(133, 83, 48, 255)); Raylib.DrawRectangle(0, (int)groundY, (int)worldWidth, 15, new Color(65, 177, 75, 255)); }
@@ -456,56 +438,11 @@ void DrawWorldGround(float worldWidth) { Raylib.DrawRectangle(0, (int)groundY, (
 enum GameState { Menu, LevelSelect, HowToPlay, Playing }
 enum EnemyType { Patroller, Flyer, Spiky }
 
-// NEW: Particle Class
-class Particle
-{
-    public Vector2 Position, Velocity;
-    public Color Color;
-    public float Life, MaxLife, Size;
-
-    public Particle(Vector2 pos, Vector2 vel, Color color, float life)
-    {
-        Position = pos; Velocity = vel; Color = color;
-        Life = life; MaxLife = life;
-        Size = (float)(Random.Shared.NextDouble() * 4 + 2);
-    }
-
-    public void Update(float dt)
-    {
-        Position += Velocity * dt;
-        Velocity.Y += 500f * dt; // Gravity on particles
-        Life -= dt;
-    }
-
-    public void Draw()
-    {
-        float alpha = Math.Clamp(Life / MaxLife, 0f, 1f);
-        Raylib.DrawCircleV(Position, Size * alpha, new Color(Color.R, Color.G, Color.B, (byte)(alpha * 255)));
-    }
-}
-
-class Enemy
-{
-    public Vector2 Position; public bool IsSquashed; public float Direction = 1f; public float Speed = 115f; public float BobTime; public EnemyType Type;
-    private readonly float startX, endX, startY;
-    public Enemy(float startX, float endX, float startY, EnemyType type) { this.startX = startX; this.endX = endX; this.startY = startY; Type = type; Reset(); }
-    public void Reset() { Position = new Vector2(startX, startY); IsSquashed = false; Direction = 1f; BobTime = 0f; }
-    public void Update(float dt)
-    {
-        if (IsSquashed) return; Position.X += Speed * Direction * dt;
-        if (Type == EnemyType.Flyer) Position.Y = startY + (float)Math.Sin(BobTime * 3f) * 60f;
-        if (Position.X >= endX) { Position.X = endX; Direction = -1f; } else if (Position.X <= startX) { Position.X = startX; Direction = 1f; }
-        BobTime += dt;
-    }
-}
+class Particle { public Vector2 Position, Velocity; public Color Color; public float Life, MaxLife, Size; public Particle(Vector2 pos, Vector2 vel, Color color, float life) { Position = pos; Velocity = vel; Color = color; Life = life; MaxLife = life; Size = (float)(Random.Shared.NextDouble() * 4 + 2); } public void Update(float dt) { Position += Velocity * dt; Velocity.Y += 500f * dt; Life -= dt; } public void Draw() { float alpha = Math.Clamp(Life / MaxLife, 0f, 1f); Raylib.DrawCircleV(Position, Size * alpha, new Color(Color.R, Color.G, Color.B, (byte)(alpha * 255))); } }
+class Enemy { public Vector2 Position; public bool IsSquashed; public float Direction = 1f; public float Speed = 115f; public float BobTime; public EnemyType Type; private readonly float startX, endX, startY; public Enemy(float startX, float endX, float startY, EnemyType type) { this.startX = startX; this.endX = endX; this.startY = startY; Type = type; Reset(); } public void Reset() { Position = new Vector2(startX, startY); IsSquashed = false; Direction = 1f; BobTime = 0f; } public void Update(float dt) { if (IsSquashed) return; Position.X += Speed * Direction * dt; if (Type == EnemyType.Flyer) Position.Y = startY + (float)Math.Sin(BobTime * 3f) * 60f; if (Position.X >= endX) { Position.X = endX; Direction = -1f; } else if (Position.X <= startX) { Position.X = startX; Direction = 1f; } BobTime += dt; } }
 class Coin { public Vector2 Position; public bool IsCollected; public float AnimTime; public Coin(Vector2 position) { Position = position; IsCollected = false; AnimTime = 0f; } public void Reset() => IsCollected = false; public void Update(float dt) { if (!IsCollected) AnimTime += dt * 6f; } }
 class Checkpoint { public Vector2 Position; public bool IsActivated; public Checkpoint(Vector2 pos) { Position = pos; IsActivated = false; } }
-class MovingPlatform
-{
-    public Rectangle Bounds; public Vector2 Delta; private Vector2 origin; private float offsetX, offsetY, speed, timer;
-    public MovingPlatform(Vector2 startPos, float width, float offsetX, float offsetY, float speed) { origin = startPos; this.offsetX = offsetX; this.offsetY = offsetY; this.speed = speed; Bounds = new Rectangle(startPos.X, startPos.Y, width, 22); Delta = Vector2.Zero; }
-    public void Update(float dt) { timer += dt * speed; Vector2 oldPos = new(Bounds.X, Bounds.Y); Bounds.X = origin.X + (float)Math.Sin(timer) * offsetX; Bounds.Y = origin.Y + (float)Math.Sin(timer) * offsetY; Delta = new Vector2(Bounds.X - oldPos.X, Bounds.Y - oldPos.Y); }
-}
+class MovingPlatform { public Rectangle Bounds; public Vector2 Delta; private Vector2 origin; private float offsetX, offsetY, speed, timer; public MovingPlatform(Vector2 startPos, float width, float offsetX, float offsetY, float speed) { origin = startPos; this.offsetX = offsetX; this.offsetY = offsetY; this.speed = speed; Bounds = new Rectangle(startPos.X, startPos.Y, width, 22); Delta = Vector2.Zero; } public void Update(float dt) { timer += dt * speed; Vector2 oldPos = new(Bounds.X, Bounds.Y); Bounds.X = origin.X + (float)Math.Sin(timer) * offsetX; Bounds.Y = origin.Y + (float)Math.Sin(timer) * offsetY; Delta = new Vector2(Bounds.X - oldPos.X, Bounds.Y - oldPos.Y); } }
 class Projectile { public Vector2 Position; public Vector2 Velocity; public float Radius = 12f; public Projectile(Vector2 startPos, Vector2 direction, float speed) { Position = startPos; Velocity = direction * speed; } public void Update(float dt) => Position += Velocity * dt; }
 class Boss
 {
